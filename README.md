@@ -151,7 +151,7 @@ These are suggestions, not certainties.
                                         │
                      ┌──────────────────┴──────────────────┐
                      ▼                                     ▼
-          src/tennis_scout/mcp_server.py           website backend (Day 3)
+          src/tennis_scout/mcp_server.py           website backend (planned)
           7 tools + scout_report prompt            same functions as tools
                      │
                      ▼
@@ -300,6 +300,15 @@ Use the full path to `uv` (`which uv` prints it):
   }
 }
 ```
+
+## Licence
+
+- **Code:** [MIT](LICENSE). You may reuse and adapt the code in this repository.
+- **Data: not included.** The tennis data was compiled by Jeff Sackmann and stays under
+  [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/). It is downloaded by
+  `scripts/download_data.py` and is not covered by the MIT licence.
+- Statistics and reports produced from the data are derived from it, so share them under the same terms:
+  credit Jeff Sackmann, non-commercial use only, same licence.
 
 ## Project structure
 
