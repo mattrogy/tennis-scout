@@ -135,6 +135,11 @@ Each entry records **the choice**, **the alternatives** and **why**.
   tools, and the prompt sets strict rules: copy numbers only from tool answers, cite numbers and match counts for every
   takeaway, flag samples under 10 matches, and never compute new numbers (no differences or averages of its own).
 - **Known limit:** these are rules given to the model, not guarantees. The README sample report was checked against the tool answers.
+- **What testing showed:** in a first free-form answer (Alcaraz vs Sinner on clay), all 22 numbers in the table matched
+  the tools exactly, but the text had two errors where the model reasoned on its own: it counted "3 of 5" matches with a
+  tie-break (the real count is 4), and claimed Sinner "avoided tie-breaks" in Monte Carlo 2026 (that match had one).
+  So the rules now also forbid counting items in a list yourself and describing play that no number shows, and they ask
+  the model to check every takeaway against the scores before writing.
 
 ## 11. Ideas for V2 (not now)
 - **Coach-focused scouting:** tour averages for the same surface and period next to every stat; a coded strength/weakness

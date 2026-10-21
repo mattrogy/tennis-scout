@@ -38,6 +38,7 @@ def test_scout_report_prompt():
     assert "Alcaraz" in text and "Sinner" in text and "surface=Clay" in text
     assert "Every takeaway must cite the numbers" in text
     assert "Do not invent" in text
+    assert "Do not count items in a list yourself" in text
     assert "data through May 2026" in text
     assert "Tactical takeaways" in text and "Data caveats" in text
 
