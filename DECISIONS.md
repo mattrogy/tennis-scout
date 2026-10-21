@@ -93,6 +93,9 @@ Each entry records **the choice**, **the alternatives** and **why**.
 - **Alternatives:** the low-level MCP API; an HTTP transport.
 - **Why:** the decorator style (`@server.tool()`) keeps each tool to a few readable lines. Stdio is what
   Claude Code and Claude Desktop use for local servers, so no port or authentication is needed.
+- **Errors:** in mcp 2.x, an unexpected Python error reaches Claude only as "Error executing tool". So the server turns
+  our expected errors (unknown player, bad surface or date) into `ToolError`, whose message Claude can read and act on
+  (for example, "Use find_player first").
 
 ## Open point for Day 2
 - **Next Gen Finals** (62 + 30 ATP matches) use special rules: sets to 4 games and no-ad scoring.

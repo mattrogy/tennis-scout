@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tennis-scout": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "tennis_scout.mcp_server"]
+    }
+  }
+}
