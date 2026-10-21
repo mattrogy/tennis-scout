@@ -197,7 +197,8 @@ def head_to_head(player_a, player_b, surface=None, date_from=None, date_to=None,
             raise StatsError("The two players are on different tours (ATP and WTA), so they never met.")
 
         rows = db.execute(f"""
-            SELECT tourney_date, tourney_name, level_name, surface, round, score, finish, won
+            SELECT tourney_date, tourney_name, level_name, surface, round, score, finish, won,
+                   tiebreaks_won, tiebreaks_lost, deciding_set
             FROM player_matches
             WHERE player_key = ? AND opponent_key = ? {filter_sql}
             ORDER BY tourney_date, {ROUND_ORDER_SQL}
@@ -205,10 +206,20 @@ def head_to_head(player_a, player_b, surface=None, date_from=None, date_to=None,
 
         matches = []
         wins = {a["player_key"]: 0, b["player_key"]: 0}
+        # Tie-break and deciding-set totals, from completed matches only (as in pressure_stats).
+        tiebreaks = {a["name"]: 0, b["name"]: 0}
+        deciding_sets = {a["name"]: 0, b["name"]: 0}
+        matches_with_tiebreak = 0
         for row in rows:
             winner = a if row["won"] else b
             if row["finish"] != "walkover":
                 wins[winner["player_key"]] += 1
+            if row["finish"] == "completed":
+                tiebreaks[a["name"]] += row["tiebreaks_won"]
+                tiebreaks[b["name"]] += row["tiebreaks_lost"]
+                matches_with_tiebreak += int(row["tiebreaks_won"] + row["tiebreaks_lost"] > 0)
+                if row["deciding_set"]:
+                    deciding_sets[winner["name"]] += 1
             matches.append({
                 "date": _week_of(row["tourney_date"]),
                 "tournament": row["tourney_name"],
@@ -218,15 +229,29 @@ def head_to_head(player_a, player_b, surface=None, date_from=None, date_to=None,
                 "winner": winner["name"],
                 "score": row["score"],
                 "finish": row["finish"],
+                # Decoded from the score, so nobody has to read '6-7(5)' from the winner's side.
+                "tiebreaks_won": {a["name"]: row["tiebreaks_won"], b["name"]: row["tiebreaks_lost"]},
+                "went_to_deciding_set": bool(row["deciding_set"]),
             })
 
+        completed = sum(1 for m in matches if m["finish"] == "completed")
         content = {
             "player_a": a,
             "player_b": b,
             "wins": {a["name"]: wins[a["player_key"]], b["name"]: wins[b["player_key"]]},
             "matches_used": sum(wins.values()),
             "matches_listed": len(matches),
-            "note": "Walkovers are listed but not counted as wins. Dates are tournament start weeks.",
+            "tiebreak_summary": {
+                "completed_matches": completed,
+                "matches_with_a_tiebreak": matches_with_tiebreak,
+                "tiebreaks_won": tiebreaks,
+            },
+            "deciding_set_summary": {
+                "completed_matches": completed,
+                "deciding_sets_won": deciding_sets,
+            },
+            "note": "Walkovers are listed but not counted as wins. Dates are tournament start weeks. "
+                    "Scores are written from the winner's side: use the tiebreaks_won fields, not the score text.",
             "matches": matches,
         }
         return _result(db, content, filters)
@@ -440,7 +465,8 @@ def recent_form(player, n=10, db_path=None):
         p = _get_player(db, player)
         rows = db.execute(f"""
             SELECT tourney_date, tourney_name, level_name, surface, round,
-                   opponent_name, opponent_rank, won, score, finish
+                   opponent_name, opponent_rank, won, score, finish,
+                   tiebreaks_won, tiebreaks_lost, deciding_set
             FROM player_matches
             WHERE player_key = ?
             ORDER BY tourney_date DESC, {ROUND_ORDER_SQL} DESC
@@ -468,6 +494,9 @@ def recent_form(player, n=10, db_path=None):
                 "result": "W" if row["won"] else "L",
                 "score": row["score"],
                 "note": note,
+                "tiebreaks_won": row["tiebreaks_won"],
+                "tiebreaks_lost": row["tiebreaks_lost"],
+                "went_to_deciding_set": bool(row["deciding_set"]),
             })
 
         played = [m for m in matches if m["note"] != "w/o"]
@@ -492,7 +521,8 @@ def recent_form(player, n=10, db_path=None):
                 "retired_from": retired_from,
                 "retired_text": f"Retired in {retired_from} of the last {len(matches)} matches.",
             },
-            "note": "'ret.' = the opponent retired; 'retired' = this player retired. Dates are tournament start weeks.",
+            "note": "'ret.' = the opponent retired; 'retired' = this player retired. Dates are tournament start weeks. "
+                    "Scores are written from the winner's side: use the tiebreaks fields, not the score text.",
             "matches": matches,
         }
         return _result(db, content, {"last_n_matches": n})

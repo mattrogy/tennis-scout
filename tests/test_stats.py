@@ -84,6 +84,18 @@ def test_head_to_head(fake_db):
     assert clay["wins"] == {"Alpha Ace": 0, "Bravo Base": 1}
 
 
+def test_head_to_head_tiebreaks_are_decoded(fake_db):
+    result = stats.head_to_head(ALPHA, BRAVO, db_path=fake_db)
+    # M1 '7-6(5) 4-6 6-3' (Alpha won): Alpha wins the tie-break.
+    # M2 '6-7(3) 7-6(5) 6-4' (Bravo won, so written from Bravo's side): Alpha wins TB 1, Bravo wins TB 2.
+    assert result["matches"][1]["tiebreaks_won"] == {"Alpha Ace": 1, "Bravo Base": 1}
+    assert result["tiebreak_summary"] == {"completed_matches": 2, "matches_with_a_tiebreak": 2,
+                                          "tiebreaks_won": {"Alpha Ace": 2, "Bravo Base": 1}}
+    # Both completed matches went to a 3rd set: Alpha won M1's, Bravo won M2's.
+    assert result["deciding_set_summary"]["deciding_sets_won"] == {"Alpha Ace": 1, "Bravo Base": 1}
+    assert [m["went_to_deciding_set"] for m in result["matches"]] == [True, True, False, False]
+
+
 def test_find_player(fake_db):
     found = stats.find_player("alpha", db_path=fake_db)["candidates"]
     assert [p["player_key"] for p in found] == [ALPHA]
@@ -210,6 +222,8 @@ def test_recent_form(fake_db):
     assert result["summary"]["wins"] == 2 and result["summary"]["losses"] == 1
     assert result["summary"]["walkovers_listed_not_counted"] == 1
     assert result["current_ranking"] == {"rank": 1, "points": 5000, "as_of": "9 June 2025"}
+    clay_cup = result["matches"][2]  # M2, from Alpha's side: won 1 tie-break, lost 1, went to a 3rd set
+    assert (clay_cup["tiebreaks_won"], clay_cup["tiebreaks_lost"], clay_cup["went_to_deciding_set"]) == (1, 1, True)
 
     bravo = stats.recent_form(BRAVO, n=2, db_path=fake_db)
     assert len(bravo["matches"]) == 2
@@ -279,6 +293,17 @@ def test_real_scope_and_freshness():
     result = stats.find_player("sinner")
     assert result["data_note"].startswith("Data through May 2026")
     assert result["candidates"][0]["rank_as_of"] == "8 June 2026"
+
+
+@real
+def test_real_head_to_head_tiebreaks_on_clay():
+    """The errors seen in early AI reports: who won the Umag 2022 tie-break, and how many clay meetings had one."""
+    result = stats.head_to_head(ALCARAZ, SINNER, surface="Clay")
+    umag = next(m for m in result["matches"] if m["tournament"] == "Umag")
+    # '6-7(5) 6-1 6-1' is written from Sinner's side (he won the match): Alcaraz won that tie-break.
+    assert umag["tiebreaks_won"] == {"Carlos Alcaraz": 1, "Jannik Sinner": 0}
+    assert result["tiebreak_summary"]["matches_with_a_tiebreak"] == 4  # Umag, Rome 2025, Roland Garros 2025, Monte Carlo
+    assert result["tiebreak_summary"]["tiebreaks_won"] == {"Carlos Alcaraz": 4, "Jannik Sinner": 2}
 
 
 @real

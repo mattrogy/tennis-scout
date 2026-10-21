@@ -39,6 +39,10 @@ def test_scout_report_prompt():
     assert "Every takeaway must cite the numbers" in text
     assert "Do not invent" in text
     assert "Do not count items in a list yourself" in text
+    # The perspective must be unambiguous: the takeaways are for Sinner's coach, about Alcaraz.
+    assert "The coach's player is Sinner. The player being scouted is Alcaraz." in text
+    assert "Never decode a score string yourself" in text
+    assert "serve_stats and return_stats for Sinner" in text
     assert "data through May 2026" in text
     assert "Tactical takeaways" in text and "Data caveats" in text
 

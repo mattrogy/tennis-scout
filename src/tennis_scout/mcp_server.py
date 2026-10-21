@@ -129,30 +129,38 @@ def recent_form(player: str, n: int = 10) -> dict[str, Any]:
 def scout_report(player: str, opponent: str | None = None, surface: str | None = None) -> str:
     """Build a scouting report on a player, for a coach preparing a match against them.
 
-    player: the player being scouted. opponent: optional, the player you are preparing (adds the head-to-head).
+    player: the player being scouted (the opponent you will face).
+    opponent: optional, the coach's own player (adds the head-to-head and matchup takeaways).
     surface: optional, 'Hard', 'Clay' or 'Grass'.
     """
     surface_text = f"on {surface}" if surface else "on all surfaces"
-    opponent_text = f" for a match against {opponent}" if opponent else ""
-    head_to_head_step = (
-        f"- head_to_head between {player} and {opponent} (with the surface filter, then without it)\n"
-        if opponent else ""
-    )
-    return f"""Write a scouting report on {player}{opponent_text}, {surface_text}.
+    surface_arg = f" with surface={surface}" if surface else ""
+    if opponent:
+        perspective = (f"The coach's player is {opponent}. The player being scouted is {player}.\n"
+                       f"Write everything for {opponent}'s coach: how {opponent} can play against {player}.")
+        extra_calls = (f"- head_to_head between {player} and {opponent}{surface_arg} (then once without the surface filter)\n"
+                       f"- serve_stats and return_stats for {opponent}{surface_arg}, so matchup takeaways can cite "
+                       f"numbers for both players\n")
+    else:
+        perspective = (f"The player being scouted is {player}. Write everything for a coach preparing a match "
+                       f"against {player}.")
+        extra_calls = ""
+
+    return f"""Write a scouting report on {player}, {surface_text}.
+{perspective}
 
 First call find_player for each name and use the player_key it returns. Then call:
-- serve_stats, return_stats and pressure_stats for {player}{" with surface=" + surface if surface else ""}
-  (also once without the surface filter, to compare)
-{head_to_head_step}- recent_form for {player} (n=10)
+- serve_stats, return_stats and pressure_stats for {player}{surface_arg} (also once without the surface filter, to compare)
+{extra_calls}- recent_form for {player} (n=10)
 
 Use exactly these sections:
 1. Summary: three lines a coach can read in ten seconds.
-2. Serve
-3. Return
-4. Pressure (tie-breaks and deciding sets)
+2. Serve ({player})
+3. Return ({player})
+4. Pressure ({player}: tie-breaks and deciding sets)
 5. Head-to-head{"" if opponent else " (write 'No opponent given.')"}
-6. Recent form (include the current ranking and its date)
-7. Tactical takeaways: 3 to 5 bullet points.
+6. Recent form ({player}, with the current ranking and its date)
+7. Tactical takeaways for {opponent + "'s coach" if opponent else "the coach"}: 3 to 5 bullet points.
 8. Data caveats
 
 Rules:
@@ -160,10 +168,14 @@ Rules:
   (no differences, no averages of your own).
 - Do not count items in a list yourself (for example "how many matches had a tie-break"): only state counts that a tool
   gives. Do not describe how a match was played (for example "held serve easily") unless a tool number shows it.
-- Before writing, check each takeaway against the scores and numbers you received: a takeaway must not contradict them.
+- Never decode a score string yourself: scores are written from the winner's side. For tie-breaks and deciding sets,
+  use the tiebreaks_won, tiebreak_summary, deciding_set_summary and went_to_deciding_set fields.
+- A takeaway about a player must cite that player's own numbers: do not describe {opponent or "anyone"}'s serve using
+  {player}'s return numbers.
 - Every takeaway must cite the numbers and match counts it is based on,
   for example "2nd serve points won 44.1% (31 matches on clay)".
 - Takeaways are suggestions for the coach, not certainties. If a number is based on fewer than 10 matches, say it is a small sample.
+- Before writing, check each takeaway against the numbers you received: a takeaway must not contradict them.
 - Data caveats must say: data through May 2026 (rankings as of 8 June 2026), which matches were excluded and why,
   that these stats cannot show shot patterns (direction, rally length), and the credit:
   data by Jeff Sackmann, CC BY-NC-SA 4.0.

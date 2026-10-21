@@ -140,6 +140,13 @@ Each entry records **the choice**, **the alternatives** and **why**.
   tie-break (the real count is 4), and claimed Sinner "avoided tie-breaks" in Monte Carlo 2026 (that match had one).
   So the rules now also forbid counting items in a list yourself and describing play that no number shows, and they ask
   the model to check every takeaway against the scores before writing.
+- **Second round:** with `scout_report`, about 60 numbers were again all correct, but (1) the model read a tie-break
+  backwards from a score written on the winner's side (`6-7(5)` at Umag 2022, a tie-break Alcaraz won), and (2) the takeaways
+  were written for the wrong camp, because my prompt wording ("a report on Alcaraz for a match against Sinner") was ambiguous.
+- **Lesson and fix:** a rule is not enough when the model *has* to interpret raw data. So the decoding moved into the tools:
+  `head_to_head` and `recent_form` now give tie-breaks won per player, "went to a deciding set", and summary counts
+  (for example "matches with a tie-break"). The prompt now says plainly who the coach's player is, fetches that player's
+  own serve and return numbers, and forbids decoding score strings.
 
 ## 11. Ideas for V2 (not now)
 - **Coach-focused scouting:** tour averages for the same surface and period next to every stat; a coded strength/weakness
