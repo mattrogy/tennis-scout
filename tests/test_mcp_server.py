@@ -1,0 +1,46 @@
+"""Tests for the MCP server: the tools Claude sees, and what they return.
+
+They call the server directly (no Claude needed) and use the real database.
+"""
+
+import asyncio
+
+import pytest
+from mcp.server.mcpserver.exceptions import ToolError
+
+from tennis_scout.db import DB_PATH
+from tennis_scout.mcp_server import server
+
+pytestmark = pytest.mark.skipif(not DB_PATH.exists(), reason="real database not built (run scripts/build_db.py)")
+
+
+def call(tool, **arguments):
+    """Call one tool the way Claude would, and return its structured answer."""
+    result = asyncio.run(server.call_tool(tool, arguments))
+    assert not result.is_error
+    return result.structured_content
+
+
+def test_three_tools_are_listed():
+    tools = asyncio.run(server.list_tools())
+    assert sorted(tool.name for tool in tools) == ["find_player", "head_to_head", "serve_stats"]
+
+
+def test_find_player_then_serve_stats():
+    sabalenka = call("find_player", name="sabalenka")["candidates"][0]
+    assert sabalenka["name"] == "Aryna Sabalenka"
+
+    result = call("serve_stats", player=sabalenka["player_key"], surface="Hard",
+                  date_from="2025-01-01", date_to="2025-12-31")
+    assert result["matches_used"] > 0
+    assert "Jeff Sackmann" in result["source"]
+    assert result["data_note"].startswith("Data through May 2026")
+
+
+def test_errors_reach_claude_as_readable_messages():
+    # A plain Python error would reach Claude only as "Error executing tool"; ours must keep its message.
+    with pytest.raises(ToolError, match="Use find_player first"):
+        asyncio.run(server.call_tool("serve_stats", {"player": "atp-1"}))
+    with pytest.raises(ToolError, match="Surface must be one of"):
+        asyncio.run(server.call_tool("head_to_head", {"player_a": "atp-206173", "player_b": "atp-207989",
+                                                      "surface": "Carpet"}))

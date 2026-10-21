@@ -1,0 +1,197 @@
+"""Tests for the stats module.
+
+Part 1 uses the tiny fake dataset from conftest.py: every expected number is calculated by hand.
+Part 2 checks known real results in the full database (skipped if it has not been built yet).
+"""
+
+import csv
+import sqlite3
+
+import pytest
+
+import build_db
+from tennis_scout import stats
+from tennis_scout.db import DB_PATH, PROJECT_ROOT
+
+ALPHA, BRAVO, CHARLIE = "atp-1", "atp-2", "atp-3"
+
+
+# ---------------------------------------------------------------- Part 1: hand-computed (fake data)
+
+
+def test_serve_stats_all_surfaces(fake_db):
+    result = stats.serve_stats(ALPHA, db_path=fake_db)
+    # Alpha played M1, M2, M3 (retired) and M4 (walkover): only M1 and M2 are used.
+    assert result["matches_found"] == 4
+    assert result["matches_used"] == 2
+    assert result["matches_excluded"] == {"walkover": 1, "retired_or_ended_early": 1, "no_usable_stats": 0}
+    # M1 + M2: serve points 80+60=140, 1st in 50+36=86, 1st won 40+24=64, 2nd won 15+10=25,
+    # aces 6+2=8, double faults 3+4=7, second serves 140-86=54.
+    assert result["serve"] == {
+        "first_serve_in_pct": 61.4,           # 86 / 140
+        "second_serve_in_pct": 87.0,          # (54 - 7) / 54
+        "first_serve_points_won_pct": 74.4,   # 64 / 86
+        "second_serve_points_won_pct": 46.3,  # 25 / 54
+        "aces_per_match": 4.0,                # 8 / 2
+        "double_faults_per_match": 3.5,       # 7 / 2
+    }
+
+
+def test_serve_stats_surface_filter(fake_db):
+    hard = stats.serve_stats(ALPHA, surface="hard", db_path=fake_db)
+    # Hard: M1 (used), M3 (retired), M4 (walkover). Only M1 counts.
+    assert (hard["matches_found"], hard["matches_used"]) == (3, 1)
+    assert hard["serve"]["first_serve_in_pct"] == 62.5           # 50 / 80
+    assert hard["serve"]["second_serve_in_pct"] == 90.0          # (30 - 3) / 30
+    assert hard["serve"]["first_serve_points_won_pct"] == 80.0   # 40 / 50
+    assert hard["serve"]["second_serve_points_won_pct"] == 50.0  # 15 / 30
+
+    clay = stats.serve_stats(ALPHA, surface="Clay", db_path=fake_db)
+    # Clay: M2 only. 36/60 in, (24-4)/24 second in, 24/36 won, 10/24 won.
+    assert clay["serve"]["first_serve_in_pct"] == 60.0
+    assert clay["serve"]["second_serve_in_pct"] == 83.3
+    assert clay["serve"]["first_serve_points_won_pct"] == 66.7
+    assert clay["serve"]["second_serve_points_won_pct"] == 41.7
+
+
+def test_serve_stats_date_filter(fake_db):
+    result = stats.serve_stats(ALPHA, date_from="2025-01-01", date_to="2025-04-30", db_path=fake_db)
+    assert result["matches_found"] == 1  # only M1 (2025-03-03)
+    assert result["serve"]["first_serve_in_pct"] == 62.5
+    assert result["filters"] == {"surface": None, "date_from": "2025-01-01", "date_to": "2025-04-30"}
+
+
+def test_lowercase_surface_and_invalid_stats(fake_db):
+    # M5 was written as 'clay' in the file, and Charlie's serve points are 0.
+    result = stats.serve_stats(CHARLIE, surface="Clay", db_path=fake_db)
+    assert result["matches_found"] == 1
+    assert result["matches_used"] == 0
+    assert result["matches_excluded"]["no_usable_stats"] == 1
+    assert result["serve"] is None
+
+
+def test_head_to_head(fake_db):
+    result = stats.head_to_head(ALPHA, BRAVO, db_path=fake_db)
+    # Alpha won M1 and M3 (retirement counts); Bravo won M2; the M4 walkover is listed but not counted.
+    assert result["wins"] == {"Alpha Ace": 2, "Bravo Base": 1}
+    assert result["matches_used"] == 3
+    assert result["matches_listed"] == 4
+    assert [m["tournament"] for m in result["matches"]] == ["Test Open", "Clay Cup", "Hard Classic", "Summer Open"]
+    assert result["matches"][3]["finish"] == "walkover"
+    assert result["matches"][0]["date"] == "week of 3 March 2025"
+
+    clay = stats.head_to_head(ALPHA, BRAVO, surface="Clay", db_path=fake_db)
+    assert clay["wins"] == {"Alpha Ace": 0, "Bravo Base": 1}
+
+
+def test_find_player(fake_db):
+    found = stats.find_player("alpha", db_path=fake_db)["candidates"]
+    assert [p["player_key"] for p in found] == [ALPHA]
+    assert found[0]["current_rank"] == 1
+    assert found[0]["rank_as_of"] == "9 June 2025"
+
+    # Accents and capitals are ignored, in both the query and the stored name.
+    assert stats.find_player("ZĄBEK", db_path=fake_db)["candidates"][0]["player_key"] == "wta-10"
+    assert stats.find_player("alpha", tour="wta", db_path=fake_db)["candidates"] == []
+
+
+def test_every_answer_carries_source_and_freshness(fake_db):
+    for result in (stats.find_player("bravo", db_path=fake_db),
+                   stats.serve_stats(BRAVO, db_path=fake_db),
+                   stats.head_to_head(ALPHA, BRAVO, db_path=fake_db)):
+        assert "Jeff Sackmann" in result["source"]
+        assert "CC BY-NC-SA 4.0" in result["source"]
+        assert result["data_note"].startswith("Data through July 2025")
+
+
+def test_itf_matches_are_excluded(fake_db):
+    db = sqlite3.connect(fake_db)
+    assert db.execute("SELECT COUNT(*) FROM matches WHERE tour = 'wta'").fetchone()[0] == 1
+    assert db.execute("SELECT COUNT(*) FROM matches WHERE tourney_level = '50+H'").fetchone()[0] == 0
+    db.close()
+
+
+@pytest.mark.parametrize("bad_call, message", [
+    (dict(player="atp-999"), "Use find_player first"),
+    (dict(player=ALPHA, surface="Carpet"), "Surface must be one of"),
+    (dict(player=ALPHA, date_from="03/03/2025"), "YYYY-MM-DD"),
+    (dict(player=ALPHA, date_from="2025-06-01", date_to="2025-01-01"), "before date_to"),
+])
+def test_clear_errors(fake_db, bad_call, message):
+    with pytest.raises(stats.StatsError, match=message):
+        stats.serve_stats(db_path=fake_db, **bad_call)
+
+
+def test_level_rules():
+    assert build_db.level_name("wta", "W", "Eastbourne") == "WTA 250/500"  # 2021 tour event: kept
+    assert build_db.level_name("wta", "W", "WTA Finals") == "WTA Finals"
+    assert build_db.level_name("wta", "W", "Buenos Aires 125") == build_db.EXCLUDE
+    assert build_db.level_name("wta", "35+H", "W35+H Tauste") == build_db.EXCLUDE
+    assert build_db.level_name("atp", "F", "Next Gen Finals") == "Next Gen Finals"
+    with pytest.raises(ValueError, match="Unknown tourney_level"):
+        build_db.level_name("atp", "C", "Some Challenger")
+
+
+def test_finish_types():
+    assert build_db.finish_type("6-3 2-1 RET") == "retired"
+    assert build_db.finish_type("W/O") == "walkover"
+    assert build_db.finish_type("Walkover") == "walkover"
+    assert build_db.finish_type("6-4 3-2 DEF") == "defaulted"
+    assert build_db.finish_type("7-6(5) 6-3") == "completed"
+
+
+# ---------------------------------------------------------------- Part 2: known real results
+
+real = pytest.mark.skipif(not DB_PATH.exists(), reason="real database not built (run scripts/build_db.py)")
+SINNER, ALCARAZ = "atp-206173", "atp-207989"
+
+
+@real
+def test_real_find_player():
+    assert stats.find_player("alcaraz")["candidates"][0]["name"] == "Carlos Alcaraz"
+    assert stats.find_player("Świątek")["candidates"][0]["name"] == "Iga Swiatek"
+
+
+@real
+def test_real_head_to_head_contains_2025_slam_finals():
+    finals = [(m["tournament"], m["date"], m["winner"])
+              for m in stats.head_to_head(SINNER, ALCARAZ)["matches"] if m["round"] == "F"]
+    assert ("Roland Garros", "week of 26 May 2025", "Carlos Alcaraz") in finals
+    assert ("Wimbledon", "week of 30 June 2025", "Jannik Sinner") in finals
+
+
+@real
+def test_real_serve_stats_match_raw_csv():
+    """Alcaraz at Roland Garros 2025, summed straight from the raw CSV (independent of the SQL)."""
+    totals = {"svpt": 0, "1stIn": 0, "ace": 0}
+    with open(PROJECT_ROOT / "data" / "raw" / "atp_matches_2025.csv", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            if row["tourney_name"] != "Roland Garros" or "RET" in row["score"] or "W/O" in row["score"]:
+                continue
+            for side, name in (("w", row["winner_name"]), ("l", row["loser_name"])):
+                if name == "Carlos Alcaraz":
+                    for key in totals:
+                        totals[key] += int(row[f"{side}_{key}"])
+
+    result = stats.serve_stats(ALCARAZ, date_from="2025-05-26", date_to="2025-05-26")
+    # He won the title (7 matches), but Musetti retired in the semi-final, so 6 are used.
+    assert result["matches_found"] == 7
+    assert result["matches_used"] == 6
+    assert result["matches_excluded"]["retired_or_ended_early"] == 1
+    assert result["totals"]["serve_points"] == totals["svpt"]
+    assert result["totals"]["first_serves_in"] == totals["1stIn"]
+    assert result["totals"]["aces"] == totals["ace"]
+
+
+@real
+def test_real_scope_and_freshness():
+    db = sqlite3.connect(DB_PATH)
+    assert db.execute("SELECT COUNT(*) FROM matches WHERE tourney_level IN ('35+H', '50+H')").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM matches WHERE tourney_name LIKE '%125%'").fetchone()[0] == 0
+    # The 2021 'W' events are real tour events and must be kept.
+    assert db.execute("SELECT COUNT(*) FROM matches WHERE tour = 'wta' AND tourney_name = 'Eastbourne' "
+                      "AND tourney_date LIKE '2021%'").fetchone()[0] > 0
+    db.close()
+    result = stats.find_player("sinner")
+    assert result["data_note"].startswith("Data through May 2026")
+    assert result["candidates"][0]["rank_as_of"] == "8 June 2026"
