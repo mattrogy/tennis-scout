@@ -1,0 +1,22 @@
+# Secrets: never commit API keys
+.env
+.env.*
+
+# Downloaded raw data and the built database (rebuild with the scripts in scripts/)
+data/
+*.db
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.pytest_cache/
+
+# Virtual environments
+.venv
+
+# Personal Claude Code settings
+.claude/settings.local.json
