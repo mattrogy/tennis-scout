@@ -41,15 +41,27 @@ Each entry records **the choice**, **the alternatives** and **why**.
 - **Alternatives:** keep everything; drop them everywhere.
 - **Why:** an injured player's half-match distorts percentages, and a walkover has no points at all.
   The result still happened, so it belongs in the head-to-head.
+- **Head-to-head wins:** retirements count as a win (official ATP/WTA rule). Walkovers are listed but **not** counted,
+  because no ball was played (also the official rule).
 
 ## 7. Tournament levels: mapped to readable names, out-of-scope events excluded
 - **Choice:** map Sackmann's level codes to names (Grand Slam, Masters 1000, WTA 1000, ...).
-  Exclude ITF events (codes `35+H`, `50+H`) and WTA 125 events (code `W` without "Finals" in the name).
-  The build stops with an error on any unknown code.
+  Exclude ITF events (codes `35+H`, `50+H`) and WTA 125 events. The build stops with an error on any unknown code.
 - **Alternatives:** keep all rows; ignore the level.
-- **Why:** the scope is tour-level matches. ITF events slipped into the WTA 2025 file (about 215 matches).
-  WTA 125 is the equivalent of ATP Challengers, which are not loaded either. Code `W` means "WTA Finals"
-  in 2015 but "WTA 125" in 2024, so the tournament name decides. Stopping on unknown codes prevents silent mislabelling.
+- **Why:** the scope is tour-level matches. ITF events slipped into the WTA 2025 file (215 matches).
+  WTA 125 is the equivalent of ATP Challengers, which are not loaded either. Stopping on unknown codes
+  prevents silent mislabelling.
+- **Code `W` is ambiguous, so the tournament name decides:** it means "WTA Finals" in 2015, nine real
+  WTA 250/500 events in 2021 (Eastbourne, Strasbourg...), and "Buenos Aires 125" in 2024. Rule: name contains
+  "Finals" → WTA Finals; contains "125" → excluded; otherwise → WTA 250/500 (kept). A first rule
+  ("not Finals = WTA 125") would have wrongly removed 270 real tour matches. A full scan of all years caught it.
+
+## 7b. Carpet: kept in records, not offered as a filter
+- **Choice:** the 19 carpet matches (Davis Cup Group II ties, 2016–2017) stay in the database. The surface filter
+  only accepts Hard, Clay and Grass. The same applies to the 168 matches with no surface recorded.
+- **Alternatives:** delete them; allow a "Carpet" filter.
+- **Why:** a result is a fact. Deleting it would quietly make some head-to-heads and records wrong.
+  A carpet filter would always return an almost empty answer. These matches have no serve stats, so they never affect percentages.
 
 ## 8. Freshness labels on every answer
 - **Choice:** every tool answer says "data through May 2026", and rankings say "as of 8 June 2026".
@@ -57,6 +69,17 @@ Each entry records **the choice**, **the alternatives** and **why**.
 - **Alternatives:** no label; a note only in the README.
 - **Why:** the snapshot is about 5 months old (no Wimbledon or US Open 2026). A coach must know that
   "recent form" stops in May, or they may prepare with outdated information.
+- **Note on dates:** Sackmann gives each match the **tournament start date**, not the day it was played.
+  So "data through 2026-05-25" means tournaments starting up to that date, including Roland Garros 2026
+  (which ended in June). Date filters work on tournament start dates.
+
+## 8b. "Usable stats" check
+- **Choice:** a match counts for percentage stats only if both players' serve numbers are present and possible
+  (serve points > 0, 1st serves in ≤ serve points, 1st serve points won ≤ 1st serves in,
+  2nd serve points won + double faults ≤ 2nd serves, break points saved ≤ faced).
+- **Alternatives:** trust every row.
+- **Why:** about 320 player-match rows contain impossible numbers (for example, 0 serve points).
+  They would distort percentages or cause a division by zero. Each answer counts them under "no usable stats".
 
 ## 9. One shared stats module
 - **Choice:** all stats logic lives in `src/tennis_scout/stats.py`. The MCP server (and the website on Day 3)
@@ -71,6 +94,15 @@ Each entry records **the choice**, **the alternatives** and **why**.
 - **Why:** the decorator style (`@server.tool()`) keeps each tool to a few readable lines. Stdio is what
   Claude Code and Claude Desktop use for local servers, so no port or authentication is needed.
 
+## Open point for Day 2
+- **Next Gen Finals** (62 + 30 ATP matches) use special rules: sets to 4 games and no-ad scoring.
+  They are labelled separately ("Next Gen Finals") so the tie-break and deciding-set stats can decide whether to leave them out.
+- **Retirement frequency as a scouting signal:** `recent_form` could show "retired in X of the last N matches"
+  (a count from the database), since repeated retirements can point to injury problems.
+
 ## 11. Ideas for V2 (not now)
 - **Fresher ATP data:** the TML database has more recent ATP matches. To check: its licence, its columns, and how to merge its player ids.
 - **Match Charting Project:** unforced errors and winners, always shown with how many matches are charted.
+- **Exact match dates:** Sackmann only gives tournament start dates, so answers say "week of ...".
+  Exact days would need a second source (e.g. tennis-data.co.uk) and name matching across sources.
+  Guessing the day from the round was rejected: it would be invented data. Order is still correct (round order).
