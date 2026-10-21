@@ -98,6 +98,9 @@ def test_find_player(fake_db):
 def test_every_answer_carries_source_and_freshness(fake_db):
     for result in (stats.find_player("bravo", db_path=fake_db),
                    stats.serve_stats(BRAVO, db_path=fake_db),
+                   stats.return_stats(BRAVO, db_path=fake_db),
+                   stats.pressure_stats(BRAVO, db_path=fake_db),
+                   stats.recent_form(BRAVO, db_path=fake_db),
                    stats.head_to_head(ALPHA, BRAVO, db_path=fake_db)):
         assert "Jeff Sackmann" in result["source"]
         assert "CC BY-NC-SA 4.0" in result["source"]
@@ -138,6 +141,87 @@ def test_finish_types():
     assert build_db.finish_type("Walkover") == "walkover"
     assert build_db.finish_type("6-4 3-2 DEF") == "defaulted"
     assert build_db.finish_type("7-6(5) 6-3") == "completed"
+
+
+@pytest.mark.parametrize("score, expected", [
+    # (tie-breaks won by the winner, tie-breaks won by the loser, sets played)
+    ("7-6(5) 4-6 6-3", (1, 0, 3)),
+    ("6-7(4) 7-6(3) 7-6(2)", (2, 1, 3)),
+    ("7-6(5) 1-6 7-6(4) 4-6 13-12(3)", (3, 0, 5)),  # Wimbledon 2019: tie-break at 12-12
+    ("4-6 6-3 [10-7]", (0, 0, 3)),                  # match tie-break: a set, not a tie-break
+    ("6-3 2-1 RET", (0, 0, 2)),
+    ("W/O", (0, 0, 0)),
+])
+def test_score_summary(score, expected):
+    assert build_db.score_summary(score) == expected
+
+
+def test_team_events_are_labelled():
+    assert build_db.level_name("atp", "A", "Laver Cup") == "Team event"
+    assert build_db.level_name("wta", "I", "United Cup") == "Team event"
+
+
+def test_return_stats(fake_db):
+    result = stats.return_stats(ALPHA, db_path=fake_db)
+    assert (result["matches_found"], result["matches_used"]) == (4, 2)
+    # Bravo's serve in M1 + M2: 1st in 42+40=82, 1st won 30+30=60, serve points 70+65=135,
+    # 2nd serves 135-82=53, 2nd won 12+14=26, break points faced 7+4=11, saved 4+2=6.
+    assert result["return"] == {
+        "return_points_won_vs_first_serve_pct": 26.8,   # (82 - 60) / 82
+        "return_points_won_vs_second_serve_pct": 50.9,  # (53 - 26) / 53
+        "break_points_converted_pct": 45.5,             # (11 - 6) / 11
+    }
+    hard = stats.return_stats(ALPHA, surface="Hard", db_path=fake_db)
+    # M1 only: (42-30)/42, (28-12)/28, (7-4)/7.
+    assert hard["return"] == {
+        "return_points_won_vs_first_serve_pct": 28.6,
+        "return_points_won_vs_second_serve_pct": 57.1,
+        "break_points_converted_pct": 42.9,
+    }
+
+
+def test_pressure_stats(fake_db):
+    result = stats.pressure_stats(ALPHA, db_path=fake_db)
+    # Used: M1 and M2. Skipped: M3 (retirement) and M4 (walkover).
+    assert result["matches_used"] == 2
+    assert result["matches_skipped"] == {"walkover": 1, "retired_or_ended_early": 1, "next_gen_finals_rules": 0}
+    # Tie-breaks: won in M1, won and lost in M2. Deciding sets: won M1, lost M2.
+    assert result["tie_breaks"] == {"played": 3, "won": 2, "lost": 1, "won_pct": 66.7}
+    assert result["deciding_sets"] == {"played": 2, "won": 1, "lost": 1, "won_pct": 50.0}
+
+    hard = stats.pressure_stats(ALPHA, surface="Hard", db_path=fake_db)
+    assert hard["tie_breaks"]["played"] == 1 and hard["deciding_sets"]["won"] == 1
+
+
+def test_pressure_match_tiebreak_and_next_gen(fake_db):
+    result = stats.pressure_stats(CHARLIE, db_path=fake_db)
+    # Charlie: M5 (no serve stats, but the score is enough), M6 ([10-7]) used; M7 (Next Gen Finals) skipped.
+    assert result["matches_used"] == 2
+    assert result["matches_skipped"]["next_gen_finals_rules"] == 1
+    assert result["tie_breaks"]["played"] == 0  # the [10-7] is not a tie-break; M7's tie-break is skipped
+    assert result["deciding_sets"] == {"played": 1, "won": 1, "lost": 0, "won_pct": 100.0}
+
+
+def test_recent_form(fake_db):
+    result = stats.recent_form(ALPHA, n=10, db_path=fake_db)
+    # Newest first: M4 (walkover), M3 (Bravo retired), M2 (loss), M1 (win).
+    assert [m["tournament"] for m in result["matches"]] == ["Summer Open", "Hard Classic", "Clay Cup", "Test Open"]
+    assert [m["note"] for m in result["matches"]] == ["w/o", "ret.", None, None]
+    assert result["summary"]["wins"] == 2 and result["summary"]["losses"] == 1
+    assert result["summary"]["walkovers_listed_not_counted"] == 1
+    assert result["current_ranking"] == {"rank": 1, "points": 5000, "as_of": "9 June 2025"}
+
+    bravo = stats.recent_form(BRAVO, n=2, db_path=fake_db)
+    assert len(bravo["matches"]) == 2
+    assert bravo["matches"][1]["note"] == "retired"  # Bravo retired in M3
+    assert bravo["summary"]["retired_text"] == "Retired in 1 of the last 2 matches."
+    assert bravo["current_ranking"]["rank"] == "unranked"
+
+
+@pytest.mark.parametrize("n", [0, 51, "ten"])
+def test_recent_form_rejects_bad_n(fake_db, n):
+    with pytest.raises(stats.StatsError, match="between 1 and 50"):
+        stats.recent_form(ALPHA, n=n, db_path=fake_db)
 
 
 # ---------------------------------------------------------------- Part 2: known real results
@@ -195,3 +279,44 @@ def test_real_scope_and_freshness():
     result = stats.find_player("sinner")
     assert result["data_note"].startswith("Data through May 2026")
     assert result["candidates"][0]["rank_as_of"] == "8 June 2026"
+
+
+@real
+def test_real_recent_form_sinner():
+    result = stats.recent_form(SINNER, n=3)
+    latest, before = result["matches"][0], result["matches"][1]
+    # Same tournament week: the R64 must come before the R128 (round order, newest first).
+    assert (latest["tournament"], latest["round"], latest["result"]) == ("Roland Garros", "R64", "L")
+    assert latest["opponent"] == "Juan Manuel Cerundolo"
+    assert before["round"] == "R128"
+    assert result["current_ranking"]["rank"] == 1
+    assert result["current_ranking"]["as_of"] == "8 June 2026"
+
+
+@real
+def test_real_pressure_alcaraz_roland_garros_2025():
+    result = stats.pressure_stats(ALCARAZ, date_from="2025-05-26", date_to="2025-05-26")
+    # Tie-breaks: 7-6(8) vs Shelton, then lost 1 and won 2 in the final. The Musetti semi-final (retired) is skipped.
+    assert result["matches_skipped"]["retired_or_ended_early"] == 1
+    assert result["tie_breaks"] == {"played": 4, "won": 3, "lost": 1, "won_pct": 75.0}
+    assert result["deciding_sets"] == {"played": 1, "won": 1, "lost": 0, "won_pct": 100.0}  # the 5-set final
+
+
+@real
+def test_real_return_stats_match_raw_csv():
+    """Alcaraz's return at Roland Garros 2025, summed straight from the raw CSV (opponents' serve numbers)."""
+    first_in = first_won = bp_faced = 0
+    with open(PROJECT_ROOT / "data" / "raw" / "atp_matches_2025.csv", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            if row["tourney_name"] != "Roland Garros" or "RET" in row["score"] or "W/O" in row["score"]:
+                continue
+            for name, opponent_side in ((row["winner_name"], "l"), (row["loser_name"], "w")):
+                if name == "Carlos Alcaraz":
+                    first_in += int(row[f"{opponent_side}_1stIn"])
+                    first_won += int(row[f"{opponent_side}_1stWon"])
+                    bp_faced += int(row[f"{opponent_side}_bpFaced"])
+
+    result = stats.return_stats(ALCARAZ, date_from="2025-05-26", date_to="2025-05-26")
+    assert result["totals"]["first_serve_return_points"] == first_in
+    assert result["totals"]["first_serve_return_points_won"] == first_in - first_won
+    assert result["totals"]["break_points"] == bp_faced

@@ -21,9 +21,32 @@ def call(tool, **arguments):
     return result.structured_content
 
 
-def test_three_tools_are_listed():
+def test_all_tools_are_listed():
     tools = asyncio.run(server.list_tools())
-    assert sorted(tool.name for tool in tools) == ["find_player", "head_to_head", "serve_stats"]
+    assert sorted(tool.name for tool in tools) == [
+        "find_player", "head_to_head", "pressure_stats", "recent_form", "return_stats", "serve_stats",
+    ]
+
+
+def test_scout_report_prompt():
+    prompts = asyncio.run(server.list_prompts())
+    assert [prompt.name for prompt in prompts] == ["scout_report"]
+
+    result = asyncio.run(server.get_prompt("scout_report", {"player": "Alcaraz", "opponent": "Sinner",
+                                                            "surface": "Clay"}))
+    text = result.messages[0].content.text
+    assert "Alcaraz" in text and "Sinner" in text and "surface=Clay" in text
+    assert "Every takeaway must cite the numbers" in text
+    assert "Do not invent" in text
+    assert "data through May 2026" in text
+    assert "Tactical takeaways" in text and "Data caveats" in text
+
+
+def test_new_tools_answer():
+    alcaraz = "atp-207989"
+    assert call("return_stats", player=alcaraz, surface="Clay")["matches_used"] > 0
+    assert call("pressure_stats", player=alcaraz)["tie_breaks"]["played"] > 0
+    assert len(call("recent_form", player=alcaraz, n=5)["matches"]) == 5
 
 
 def test_find_player_then_serve_stats():

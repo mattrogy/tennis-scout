@@ -97,13 +97,49 @@ Each entry records **the choice**, **the alternatives** and **why**.
   our expected errors (unknown player, bad surface or date) into `ToolError`, whose message Claude can read and act on
   (for example, "Use find_player first").
 
-## Open point for Day 2
-- **Next Gen Finals** (62 + 30 ATP matches) use special rules: sets to 4 games and no-ad scoring.
-  They are labelled separately ("Next Gen Finals") so the tie-break and deciding-set stats can decide whether to leave them out.
-- **Retirement frequency as a scouting signal:** `recent_form` could show "retired in X of the last N matches"
-  (a count from the database), since repeated retirements can point to injury problems.
+## 12. Pressure stats are read from the score text
+- **Choice:** the build reads each score (for example `6-7(4) 7-6(3) 6-4`, written from the winner's side) and stores
+  the tie-breaks won by each player, the number of sets, and whether the match went to a deciding set.
+  `pressure_stats` then simply adds these up in SQL.
+- **Alternatives:** parse scores at question time in Python.
+- **Why:** the parsing is done once, tested on its own (`score_summary`), and the stats stay simple sums, like the others.
+- **Special formats:**
+  - `[10-7]` is a match tie-break played *instead of* a final set (Laver Cup, some Davis Cup, 3 WTA events in 2021).
+    It counts as the deciding set, **not** as a tie-break.
+  - `13-12(3)` (Wimbledon 2019, tie-break at 12-12) is a tie-break.
+  - **Next Gen Finals** (92 ATP matches: sets to 4 games, no-ad) are **skipped** and counted as skipped, because their
+    tie-breaks and deciding sets are not comparable.
+- **Deciding set:** a completed match that went the full distance (3rd set of 3, 5th of 5).
+- **Completed matches only:** retirements, defaults, abandoned matches and walkovers are skipped, as for serve and return stats.
+  An early idea was to drop only the unfinished set; dropping the whole match is simpler and consistent, since the injury
+  affects the whole match. Pressure stats do **not** need serve numbers, so they include old Davis Cup matches without stats.
+
+## 13. Return stats come from the opponent's serve numbers
+- **Choice:** return points won vs 1st serve = opponent's 1st serves in − 1st serve points they won;
+  vs 2nd serve = opponent's 2nd serves − 2nd serve points they won (double faults count as return points won,
+  as in official stats); break points converted = opponent's break points faced − saved.
+- **Why:** the files have no return columns. Every return point is an opponent's serve point, so this is exact, not an estimate.
+
+## 14. Recent form and team events
+- `recent_form` lists the last N matches, newest first (date, then round order). "ret." means the opponent retired,
+  "retired" means this player retired. Walkovers are listed but not counted in the win/loss record.
+  It reports "retired in X of the last N matches", because repeated retirements can point to injury problems.
+- **Team events** (Laver Cup, ATP Cup, United Cup, 473 matches) were filed under ordinary level codes ("ATP 500/250",
+  "WTA 250"). They are now labelled "Team event" by tournament name, so a recent-form list never shows the Laver Cup as an ATP 250.
+
+## 15. The scouting report is an MCP prompt, not code
+- **Choice:** `scout_report` is an MCP prompt: a fixed set of instructions telling Claude which tools to call and how to write
+  the 8 sections. It appears in Claude Code as `/mcp__tennis-scout__scout_report`.
+- **Alternatives:** generate the report text in Python.
+- **Why:** writing clear takeaways is what the language model is good at; computing numbers is not. So the numbers come from
+  tools, and the prompt sets strict rules: copy numbers only from tool answers, cite numbers and match counts for every
+  takeaway, flag samples under 10 matches, and never compute new numbers (no differences or averages of its own).
+- **Known limit:** these are rules given to the model, not guarantees. The README sample report was checked against the tool answers.
 
 ## 11. Ideas for V2 (not now)
+- **Coach-focused scouting:** tour averages for the same surface and period next to every stat; a coded strength/weakness
+  rule (clearly above or below average **and** at least N matches, otherwise "not enough data"); a matchup view "for my player"
+  (opponent's serve vs my player's return, and the other way round); tactical ideas labelled as suggestions, each tied to a cited number.
 - **Fresher ATP data:** the TML database has more recent ATP matches. To check: its licence, its columns, and how to merge its player ids.
 - **Match Charting Project:** unforced errors and winners, always shown with how many matches are charted.
 - **Exact match dates:** Sackmann only gives tournament start dates, so answers say "week of ...".

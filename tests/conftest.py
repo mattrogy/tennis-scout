@@ -42,11 +42,12 @@ def match(tourney, surface, level, date, round_, winner, loser, score, w_serve=N
 
 
 ATP_MATCHES = [
-    # M1: Alpha beats Bravo on hard.
-    match("Test Open", "Hard", "A", "20250303", "F", 1, 2, "6-4 6-4",
+    # M1: Alpha beats Bravo on hard, winning a tie-break and the deciding set.
+    match("Test Open", "Hard", "A", "20250303", "F", 1, 2, "7-6(5) 4-6 6-3",
           serve(6, 3, 80, 50, 40, 15, 12, 2, 3), serve(4, 2, 70, 42, 30, 12, 11, 4, 7)),
-    # M2: Bravo beats Alpha on clay.
-    match("Clay Cup", "Clay", "A", "20250505", "F", 2, 1, "6-3 6-4",
+    # M2: Bravo beats Alpha on clay. Scores are from the winner's side:
+    # Bravo loses tie-break 1 (Alpha wins it), wins tie-break 2, and wins the deciding set.
+    match("Clay Cup", "Clay", "A", "20250505", "F", 2, 1, "6-7(3) 7-6(5) 6-4",
           serve(5, 1, 65, 40, 30, 14, 10, 2, 4), serve(2, 4, 60, 36, 24, 10, 10, 3, 6)),
     # M3: Bravo retires: counts in the head-to-head, not in percentages.
     match("Hard Classic", "Hard", "A", "20250602", "SF", 1, 2, "6-3 2-1 RET",
@@ -56,6 +57,10 @@ ATP_MATCHES = [
     # M5: lowercase 'clay' must become 'Clay'; 0 serve points = no usable stats.
     match("Clay Cup", "clay", "A", "20250505", "R16", 3, 4, "6-2 6-2",
           serve(0, 0, 0, 0, 0, 0, 0, 0, 0), serve(1, 1, 40, 25, 15, 7, 8, 2, 5)),
+    # M6: a match tie-break replaces the 3rd set: a deciding set, but not a tie-break.
+    match("Team Test", "Hard", "A", "20250609", "F", 3, 4, "4-6 6-3 [10-7]"),
+    # M7: Next Gen Finals (sets to 4 games): skipped by pressure stats.
+    match("Next Gen Finals", "Hard", "F", "20250616", "F", 3, 4, "4-3(5) 4-2 4-1"),
 ]
 WTA_MATCHES = [
     match("WTA Test", "Hard", "I", "20250303", "R32", 10, 11, "6-1 6-1"),

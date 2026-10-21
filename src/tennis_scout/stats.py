@@ -232,6 +232,38 @@ def head_to_head(player_a, player_b, surface=None, date_from=None, date_to=None,
         return _result(db, content, filters)
 
 
+# ---------------------------------------------------------------- point-based stats (serve, return)
+
+# A match is "used" for point-based stats when it was completed and both players' serve numbers are valid.
+USED_FOR_POINTS = "(finish = 'completed' AND stats_ok = 1)"
+ENDED_EARLY = "finish IN ('retired', 'defaulted', 'abandoned')"
+
+# The match counts every point-based answer carries: found, used, and why the others were left out.
+POINT_COUNTS_SQL = f"""
+    COUNT(*) AS found,
+    SUM({USED_FOR_POINTS}) AS used,
+    SUM(finish = 'walkover') AS walkovers,
+    SUM({ENDED_EARLY}) AS ended_early,
+    SUM(finish = 'completed' AND stats_ok = 0) AS no_stats"""
+
+
+def _sum_used(column):
+    """SQL that adds up one column over the used matches only."""
+    return f'SUM(CASE WHEN {USED_FOR_POINTS} THEN "{column}" END)'
+
+
+def _point_counts(row):
+    return {
+        "matches_found": row["found"],
+        "matches_used": row["used"] or 0,
+        "matches_excluded": {
+            "walkover": row["walkovers"] or 0,
+            "retired_or_ended_early": row["ended_early"] or 0,
+            "no_usable_stats": row["no_stats"] or 0,
+        },
+    }
+
+
 def serve_stats(player, surface=None, date_from=None, date_to=None, db_path=None):
     """Serve statistics for one player, added up over all matching matches.
 
@@ -243,35 +275,20 @@ def serve_stats(player, surface=None, date_from=None, date_to=None, db_path=None
 
     with closing(connect(db_path)) as db:
         p = _get_player(db, player)
-        # "used" = completed matches with valid serve numbers; only those are added up.
-        used = "(finish = 'completed' AND stats_ok = 1)"
         row = db.execute(f"""
-            SELECT COUNT(*) AS found,
-                   SUM({used}) AS used,
-                   SUM(finish = 'walkover') AS walkovers,
-                   SUM(finish IN ('retired', 'defaulted', 'abandoned')) AS ended_early,
-                   SUM(finish = 'completed' AND stats_ok = 0) AS no_stats,
-                   SUM(CASE WHEN {used} THEN "svpt" END) AS serve_points,
-                   SUM(CASE WHEN {used} THEN "1stIn" END) AS first_in,
-                   SUM(CASE WHEN {used} THEN "1stWon" END) AS first_won,
-                   SUM(CASE WHEN {used} THEN "2ndWon" END) AS second_won,
-                   SUM(CASE WHEN {used} THEN "ace" END) AS aces,
-                   SUM(CASE WHEN {used} THEN "df" END) AS double_faults
+            SELECT {POINT_COUNTS_SQL},
+                   {_sum_used("svpt")} AS serve_points,
+                   {_sum_used("1stIn")} AS first_in,
+                   {_sum_used("1stWon")} AS first_won,
+                   {_sum_used("2ndWon")} AS second_won,
+                   {_sum_used("ace")} AS aces,
+                   {_sum_used("df")} AS double_faults
             FROM player_matches
             WHERE player_key = ? {filter_sql}
         """, [p["player_key"]] + filter_values).fetchone()
 
-        matches_used = row["used"] or 0
-        content = {
-            "player": p,
-            "matches_found": row["found"],
-            "matches_used": matches_used,
-            "matches_excluded": {
-                "walkover": row["walkovers"] or 0,
-                "retired_or_ended_early": row["ended_early"] or 0,
-                "no_usable_stats": row["no_stats"] or 0,
-            },
-        }
+        content = {"player": p, **_point_counts(row)}
+        matches_used = content["matches_used"]
         if matches_used == 0:
             content["serve"] = None
             content["message"] = "No completed match with usable serve stats for these filters."
@@ -298,3 +315,184 @@ def serve_stats(player, surface=None, date_from=None, date_to=None, db_path=None
             "double_faults": row["double_faults"],
         }
         return _result(db, content, filters)
+
+
+def return_stats(player, surface=None, date_from=None, date_to=None, db_path=None):
+    """Return statistics for one player, computed from the opponents' serve numbers.
+
+    Same rules as serve_stats: points are added up first, then divided.
+    """
+    filters = _check_filters(surface, date_from, date_to)
+    filter_sql, filter_values = _filter_sql(filters)
+
+    with closing(connect(db_path)) as db:
+        p = _get_player(db, player)
+        row = db.execute(f"""
+            SELECT {POINT_COUNTS_SQL},
+                   {_sum_used("opp_svpt")} AS opp_serve_points,
+                   {_sum_used("opp_1stIn")} AS opp_first_in,
+                   {_sum_used("opp_1stWon")} AS opp_first_won,
+                   {_sum_used("opp_2ndWon")} AS opp_second_won,
+                   {_sum_used("opp_bpFaced")} AS break_points,
+                   {_sum_used("opp_bpSaved")} AS break_points_saved_by_opponent
+            FROM player_matches
+            WHERE player_key = ? {filter_sql}
+        """, [p["player_key"]] + filter_values).fetchone()
+
+        content = {"player": p, **_point_counts(row)}
+        if content["matches_used"] == 0:
+            content["return"] = None
+            content["message"] = "No completed match with usable stats for these filters."
+            return _result(db, content, filters)
+
+        # Every point the opponent did not win on serve was won by our player on return.
+        # (Double faults count as return points won, as in official stats.)
+        first_serve_returns = row["opp_first_in"]
+        first_serve_returns_won = row["opp_first_in"] - row["opp_first_won"]
+        second_serve_returns = row["opp_serve_points"] - row["opp_first_in"]
+        second_serve_returns_won = second_serve_returns - row["opp_second_won"]
+        break_points_won = row["break_points"] - row["break_points_saved_by_opponent"]
+        content["return"] = {
+            "return_points_won_vs_first_serve_pct": _percent(first_serve_returns_won, first_serve_returns),
+            "return_points_won_vs_second_serve_pct": _percent(second_serve_returns_won, second_serve_returns),
+            "break_points_converted_pct": _percent(break_points_won, row["break_points"]),
+        }
+        content["totals"] = {
+            "first_serve_return_points": first_serve_returns,
+            "first_serve_return_points_won": first_serve_returns_won,
+            "second_serve_return_points": second_serve_returns,
+            "second_serve_return_points_won": second_serve_returns_won,
+            "break_points": row["break_points"],
+            "break_points_won": break_points_won,
+        }
+        return _result(db, content, filters)
+
+
+# ---------------------------------------------------------------- score-based stats (pressure, form)
+
+# Next Gen Finals use sets to 4 games and no-ad scoring, so their tie-breaks and deciding sets are not comparable.
+NEXT_GEN = "level_name = 'Next Gen Finals'"
+USED_FOR_PRESSURE = f"(finish = 'completed' AND NOT {NEXT_GEN})"
+
+
+def pressure_stats(player, surface=None, date_from=None, date_to=None, db_path=None):
+    """Tie-break record and deciding-set record, read from the scores.
+
+    Uses completed matches only (with or without serve stats). Retirements, walkovers and
+    Next Gen Finals are skipped and counted.
+    """
+    filters = _check_filters(surface, date_from, date_to)
+    filter_sql, filter_values = _filter_sql(filters)
+
+    with closing(connect(db_path)) as db:
+        p = _get_player(db, player)
+        row = db.execute(f"""
+            SELECT COUNT(*) AS found,
+                   SUM({USED_FOR_PRESSURE}) AS used,
+                   SUM(finish = 'walkover') AS walkovers,
+                   SUM({ENDED_EARLY}) AS ended_early,
+                   SUM(finish = 'completed' AND {NEXT_GEN}) AS next_gen,
+                   SUM(CASE WHEN {USED_FOR_PRESSURE} THEN tiebreaks_won END) AS tiebreaks_won,
+                   SUM(CASE WHEN {USED_FOR_PRESSURE} THEN tiebreaks_lost END) AS tiebreaks_lost,
+                   SUM(CASE WHEN {USED_FOR_PRESSURE} THEN deciding_set END) AS deciding_sets,
+                   SUM(CASE WHEN {USED_FOR_PRESSURE} AND deciding_set = 1 THEN won END) AS deciding_sets_won
+            FROM player_matches
+            WHERE player_key = ? {filter_sql}
+        """, [p["player_key"]] + filter_values).fetchone()
+
+        tiebreaks_won = row["tiebreaks_won"] or 0
+        tiebreaks_lost = row["tiebreaks_lost"] or 0
+        deciding_sets = row["deciding_sets"] or 0
+        deciding_sets_won = row["deciding_sets_won"] or 0
+        content = {
+            "player": p,
+            "matches_found": row["found"],
+            "matches_used": row["used"] or 0,
+            "matches_skipped": {
+                "walkover": row["walkovers"] or 0,
+                "retired_or_ended_early": row["ended_early"] or 0,
+                "next_gen_finals_rules": row["next_gen"] or 0,
+            },
+            "tie_breaks": {
+                "played": tiebreaks_won + tiebreaks_lost,
+                "won": tiebreaks_won,
+                "lost": tiebreaks_lost,
+                "won_pct": _percent(tiebreaks_won, tiebreaks_won + tiebreaks_lost),
+            },
+            "deciding_sets": {
+                "played": deciding_sets,
+                "won": deciding_sets_won,
+                "lost": deciding_sets - deciding_sets_won,
+                "won_pct": _percent(deciding_sets_won, deciding_sets),
+            },
+            "note": "A deciding set is the last possible set (3rd of 3, 5th of 5). "
+                    "A match tie-break such as [10-7] counts as a deciding set, not as a tie-break.",
+        }
+        return _result(db, content, filters)
+
+
+def recent_form(player, n=10, db_path=None):
+    """The player's last n matches (newest first), their record, and their current ranking."""
+    if not isinstance(n, int) or not 1 <= n <= 50:
+        raise StatsError("n must be a whole number between 1 and 50.")
+
+    with closing(connect(db_path)) as db:
+        p = _get_player(db, player)
+        rows = db.execute(f"""
+            SELECT tourney_date, tourney_name, level_name, surface, round,
+                   opponent_name, opponent_rank, won, score, finish
+            FROM player_matches
+            WHERE player_key = ?
+            ORDER BY tourney_date DESC, {ROUND_ORDER_SQL} DESC
+            LIMIT ?
+        """, (p["player_key"], n)).fetchall()
+
+        matches = []
+        for row in rows:
+            if row["finish"] == "walkover":
+                note = "w/o"
+            elif row["finish"] == "retired":
+                note = "ret." if row["won"] else "retired"  # "ret." = the opponent retired
+            elif row["finish"] in ("defaulted", "abandoned"):
+                note = row["finish"]
+            else:
+                note = None
+            matches.append({
+                "date": _week_of(row["tourney_date"]),
+                "tournament": row["tourney_name"],
+                "level": row["level_name"],
+                "surface": row["surface"] or "unknown",
+                "round": row["round"],
+                "opponent": row["opponent_name"],
+                "opponent_rank_at_the_time": row["opponent_rank"],
+                "result": "W" if row["won"] else "L",
+                "score": row["score"],
+                "note": note,
+            })
+
+        played = [m for m in matches if m["note"] != "w/o"]
+        retired_from = sum(1 for m in matches if m["note"] == "retired")
+        ranking = db.execute("""
+            SELECT rank, points FROM rankings
+            WHERE player_key = ? AND ranking_date = (SELECT MAX(ranking_date) FROM rankings WHERE tour = ?)
+        """, (p["player_key"], p["tour"])).fetchone()
+
+        content = {
+            "player": p,
+            "current_ranking": {
+                "rank": ranking["rank"] if ranking else "unranked",
+                "points": ranking["points"] if ranking else None,
+                "as_of": _freshness(db)["rankings_as_of"],
+            },
+            "matches_used": len(played),
+            "summary": {
+                "wins": sum(1 for m in played if m["result"] == "W"),
+                "losses": sum(1 for m in played if m["result"] == "L"),
+                "walkovers_listed_not_counted": len(matches) - len(played),
+                "retired_from": retired_from,
+                "retired_text": f"Retired in {retired_from} of the last {len(matches)} matches.",
+            },
+            "note": "'ret.' = the opponent retired; 'retired' = this player retired. Dates are tournament start weeks.",
+            "matches": matches,
+        }
+        return _result(db, content, {"last_n_matches": n})
