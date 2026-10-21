@@ -34,6 +34,7 @@ def test_serve_stats_all_surfaces(fake_db):
         "second_serve_points_won_pct": 46.3,  # 25 / 54
         "aces_per_match": 4.0,                # 8 / 2
         "double_faults_per_match": 3.5,       # 7 / 2
+        "break_points_saved_pct": 55.6,       # saved 2+3=5 of faced 3+6=9
     }
 
 
@@ -238,6 +239,63 @@ def test_recent_form_rejects_bad_n(fake_db, n):
         stats.recent_form(ALPHA, n=n, db_path=fake_db)
 
 
+# ---------------------------------------------------------------- Part 1b: comparison with the tour (fake data)
+
+
+@pytest.fixture
+def small_thresholds(monkeypatch):
+    """The fake data has 2 matches per player and 2 players with stats: lower the thresholds to 1."""
+    monkeypatch.setattr(stats, "MIN_MATCHES", 1)
+    monkeypatch.setattr(stats, "MIN_PEERS", 1)
+
+
+def test_compared_to_tour(fake_db, small_thresholds):
+    alpha = stats.serve_stats(ALPHA, db_path=fake_db)["compared_to_tour"]
+    # Only Alpha and Bravo have usable stats. Bravo's 1st serve in: 82/135 = 60.7%, below Alpha's 61.4%.
+    # Tour average = all used ATP serve points: (86 + 82) / (140 + 135) = 61.1%.
+    assert alpha["first_serve_in_pct"] == {"tour_average": 61.1, "peers": 1, "percentile": 100, "label": "strength"}
+    # Double faults per match, lower is better: Alpha 3.5 vs Bravo 1.5, so Alpha is worse.
+    assert alpha["double_faults_per_match"]["percentile"] == 0
+    assert alpha["double_faults_per_match"]["label"] == "weakness"
+
+    bravo = stats.serve_stats(BRAVO, db_path=fake_db)["compared_to_tour"]
+    assert bravo["first_serve_in_pct"]["label"] == "weakness"
+
+
+def test_pressure_comparison_has_no_tour_average(fake_db, small_thresholds):
+    result = stats.pressure_stats(ALPHA, db_path=fake_db)["compared_to_tour"]["tie_breaks_won_pct"]
+    # Alpha won 2 of 3 tie-breaks (66.7%), Bravo 1 of 3 (33.3%). Charlie and Delta have no tie-breaks to compare.
+    assert result == {"peers": 1, "percentile": 100, "label": "strength"}
+
+
+def test_not_enough_data_and_not_enough_peers(fake_db, monkeypatch):
+    # Real thresholds: Alpha has only 2 matches (< 10).
+    assert stats.serve_stats(ALPHA, db_path=fake_db)["compared_to_tour"]["first_serve_in_pct"]["label"] == "not enough data"
+    # Enough matches, but 1 peer is far below the minimum of 30.
+    monkeypatch.setattr(stats, "MIN_MATCHES", 1)
+    entry = stats.serve_stats(ALPHA, db_path=fake_db)["compared_to_tour"]["first_serve_in_pct"]
+    assert (entry["label"], entry["peers"], entry["percentile"]) == ("not enough peers", 1, None)
+
+
+def test_matchup(fake_db, small_thresholds):
+    result = stats.matchup(ALPHA, BRAVO, db_path=fake_db)
+    first_serve = result["when Alpha Ace serves"][0]
+    assert first_serve["server"]["value"] == 74.4    # Alpha's 1st serve points won: 64 / 86
+    assert first_serve["returner"]["value"] == 25.6  # Bravo's return vs 1st serve: (86 - 64) / 86
+    # They only played each other, so every 1st-serve point Alpha did not win, Bravo won.
+    assert first_serve["server"]["value"] + first_serve["returner"]["value"] == 100.0
+    break_points = result["when Bravo Base serves"][2]
+    assert break_points["about"] == "break points"
+    assert break_points["returner"]["value"] == 45.5  # Alpha converted 5 of 11 (same as return_stats)
+
+
+def test_default_report_period(fake_db):
+    # Fake data runs through 2025-07-07: the 24 months are August 2023 to July 2025.
+    assert stats.default_report_period(db_path=fake_db) == {
+        "date_from": "2023-08-01", "date_to": "2025-07-07", "label": "August 2023 – July 2025",
+    }
+
+
 # ---------------------------------------------------------------- Part 2: known real results
 
 real = pytest.mark.skipif(not DB_PATH.exists(), reason="real database not built (run scripts/build_db.py)")
@@ -345,3 +403,41 @@ def test_real_return_stats_match_raw_csv():
     assert result["totals"]["first_serve_return_points"] == first_in
     assert result["totals"]["first_serve_return_points_won"] == first_in - first_won
     assert result["totals"]["break_points"] == bp_faced
+
+
+@real
+def test_real_default_report_period():
+    assert stats.default_report_period() == {
+        "date_from": "2024-06-01", "date_to": "2026-05-25", "label": "June 2024 – May 2026",
+    }
+
+
+@real
+def test_real_serve_plus_return_equals_100():
+    """Every serve point is someone's return point, so the tour averages must add up to 100%."""
+    serve = stats.serve_stats(ALCARAZ, surface="Clay")["compared_to_tour"]
+    ret = stats.return_stats(ALCARAZ, surface="Clay")["compared_to_tour"]
+    total = (serve["first_serve_points_won_pct"]["tour_average"]
+             + ret["return_points_won_vs_first_serve_pct"]["tour_average"])
+    assert abs(total - 100) <= 0.1  # each average is rounded to 1 decimal
+
+
+@real
+def test_real_alcaraz_clay_labels():
+    serve = stats.serve_stats(ALCARAZ, surface="Clay")["compared_to_tour"]
+    ret = stats.return_stats(ALCARAZ, surface="Clay")["compared_to_tour"]
+    assert ret["return_points_won_vs_first_serve_pct"]["label"] == "strength"
+    assert serve["first_serve_points_won_pct"]["label"] == "average"
+    assert serve["aces_per_match"]["label"] == "weakness"
+    assert serve["aces_per_match"]["peers"] >= stats.MIN_PEERS
+
+
+@real
+def test_real_matchup_matches_the_separate_tools():
+    period = stats.default_report_period()
+    filters = {"surface": "Clay", "date_from": period["date_from"], "date_to": period["date_to"]}
+    result = stats.matchup(SINNER, ALCARAZ, **filters)
+    pair = result["when Jannik Sinner serves"][0]
+    assert pair["server"]["value"] == stats.serve_stats(SINNER, **filters)["serve"]["first_serve_points_won_pct"]
+    assert pair["returner"]["value"] == stats.return_stats(ALCARAZ, **filters)["return"][
+        "return_points_won_vs_first_serve_pct"]
