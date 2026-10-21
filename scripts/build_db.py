@@ -57,12 +57,17 @@ WTA_LEVELS = {
 }
 SURFACES = {"hard": "Hard", "clay": "Clay", "grass": "Grass", "carpet": "Carpet"}
 
+# Team events filed under ordinary level codes ("A" or "I") in the source files.
+TEAM_EVENTS = ("laver cup", "atp cup", "united cup")
+
 # Returned by level_name() for matches we do not load (out of scope).
 EXCLUDE = "EXCLUDE"
 
 
 def level_name(tour, code, tourney_name):
     """Turn Sackmann's level code into a readable name, or EXCLUDE for out-of-scope events."""
+    if any(event in tourney_name.lower() for event in TEAM_EVENTS):
+        return "Team event"
     if tour == "atp":
         if code == "F" and "next" in tourney_name.lower():
             return "Next Gen Finals"
@@ -130,6 +135,31 @@ def serve_stats_ok(row, side):
     )
 
 
+def score_summary(score):
+    """Read a score such as '6-7(4) 7-6(3) 6-4', which is written from the winner's side.
+
+    Returns (tie-breaks won by the winner, tie-breaks won by the loser, sets played).
+    A match tie-break such as '[10-7]' replaces the final set: it counts as a set, not as a tie-break.
+    Words such as RET or W/O are ignored.
+    """
+    winner_tiebreaks = loser_tiebreaks = sets_played = 0
+    for token in score.split():
+        if token.startswith("[") and token.endswith("]"):
+            sets_played += 1
+            continue
+        games = token.split("(")[0]  # '7-6(5)' -> '7-6'
+        if not games.replace("-", "").isdigit():
+            continue  # not a set: RET, W/O, DEF...
+        sets_played += 1
+        if "(" in token:  # the set ended in a tie-break
+            winner_games, loser_games = (int(number) for number in games.split("-"))
+            if winner_games > loser_games:
+                winner_tiebreaks += 1
+            else:
+                loser_tiebreaks += 1
+    return winner_tiebreaks, loser_tiebreaks, sets_played
+
+
 def iso_date(yyyymmdd):
     """'20250526' -> '2025-05-26'."""
     text = str(yyyymmdd)
@@ -158,6 +188,10 @@ def create_tables(db, match_columns):
             level_name TEXT NOT NULL,
             finish TEXT NOT NULL,          -- completed / retired / defaulted / abandoned / walkover
             stats_ok INTEGER NOT NULL,     -- 1 if both players' serve numbers are complete and valid
+            w_tiebreaks_won INTEGER NOT NULL,
+            l_tiebreaks_won INTEGER NOT NULL,
+            sets_played INTEGER NOT NULL,
+            deciding_set INTEGER NOT NULL, -- 1 if a completed match went the full distance (e.g. 3 sets of 3)
             winner_key TEXT NOT NULL,      -- e.g. 'atp-206173'
             loser_key TEXT NOT NULL,
             {", ".join(column_sql)}
@@ -211,6 +245,8 @@ def load_matches(db, raw_dir, years):
                 row["level_name"] = level
                 row["finish"] = finish_type(raw["score"])
                 row["stats_ok"] = int(serve_stats_ok(row, "w") and serve_stats_ok(row, "l"))
+                row["w_tiebreaks_won"], row["l_tiebreaks_won"], row["sets_played"] = score_summary(raw["score"])
+                row["deciding_set"] = int(row["finish"] == "completed" and row["sets_played"] == row["best_of"])
                 row["winner_key"] = f"{tour}-{row['winner_id']}"
                 row["loser_key"] = f"{tour}-{row['loser_id']}"
 
@@ -272,6 +308,8 @@ def create_view_and_indexes(db):
                    {me_name}_key AS player_key, {opp_name}_key AS opponent_key,
                    {me_name}_name AS player_name, {opp_name}_name AS opponent_name,
                    {me_name}_rank AS player_rank, {opp_name}_rank AS opponent_rank,
+                   {me}_tiebreaks_won AS tiebreaks_won, {opp}_tiebreaks_won AS tiebreaks_lost,
+                   sets_played, deciding_set,
                    {own}, {theirs}
             FROM matches""")
     db.executescript(f"""
@@ -320,6 +358,8 @@ def build(raw_dir=RAW_DIR, db_path=DB_PATH, years=range(FIRST_YEAR, LAST_YEAR + 
         print(f"  {tour.upper()}  {counts}")
     print(f"Total matches: {sum(loaded.values())}")
     print("How matches finished:", dict(finishes))
+    pressure = db.execute("SELECT SUM(w_tiebreaks_won + l_tiebreaks_won), SUM(deciding_set) FROM matches").fetchone()
+    print(f"Tie-breaks: {pressure[0]}, completed matches that went to a deciding set: {pressure[1]}")
     stats_ok = db.execute("SELECT SUM(stats_ok), COUNT(*) FROM matches").fetchone()
     print(f"Matches with usable serve stats: {stats_ok[0]} of {stats_ok[1]}")
     no_surface = db.execute("SELECT COUNT(*) FROM matches WHERE surface IS NULL").fetchone()[0]
