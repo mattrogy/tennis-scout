@@ -9,7 +9,7 @@ import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
 from tennis_scout.db import DB_PATH
-from tennis_scout.mcp_server import server
+from tennis_scout.mcp_server import INSTRUCTIONS, REPORT_RULES, REPORT_SECTIONS, server
 
 pytestmark = pytest.mark.skipif(not DB_PATH.exists(), reason="real database not built (run scripts/build_db.py)")
 
@@ -24,8 +24,19 @@ def call(tool, **arguments):
 def test_all_tools_are_listed():
     tools = asyncio.run(server.list_tools())
     assert sorted(tool.name for tool in tools) == [
-        "find_player", "head_to_head", "pressure_stats", "recent_form", "return_stats", "serve_stats",
+        "find_player", "head_to_head", "matchup", "pressure_stats", "recent_form", "return_stats", "serve_stats",
     ]
+
+
+def test_report_rules_apply_to_free_questions_too():
+    # Free-form questions never see the prompt, so the server instructions must carry the same rules.
+    assert REPORT_RULES in INSTRUCTIONS
+    assert "it is not clear which one is the coach's own player, ask before writing" in REPORT_RULES
+    assert "June 2024 – May 2026" in REPORT_RULES  # default period, read from the database
+    for number, section in enumerate(REPORT_SECTIONS, start=1):
+        assert f"{number}. {section}" in REPORT_RULES
+    assert len(REPORT_SECTIONS) == 10
+    assert 'only if its label in compared_to_tour says "strength" or "weakness"' in REPORT_RULES
 
 
 def test_scout_report_prompt():
@@ -43,6 +54,9 @@ def test_scout_report_prompt():
     assert "The coach's player is Sinner. The player being scouted is Alcaraz." in text
     assert "Never decode a score string yourself" in text
     assert "serve_stats and return_stats for Sinner" in text
+    assert "matchup with player=Alcaraz, opponent=Sinner" in text
+    assert "for the period June 2024 – May 2026" in text
+    assert REPORT_RULES in text  # the slash command and free questions share the exact same rules
     assert "data through May 2026" in text
     assert "Tactical takeaways" in text and "Data caveats" in text
 
@@ -52,6 +66,8 @@ def test_new_tools_answer():
     assert call("return_stats", player=alcaraz, surface="Clay")["matches_used"] > 0
     assert call("pressure_stats", player=alcaraz)["tie_breaks"]["played"] > 0
     assert len(call("recent_form", player=alcaraz, n=5)["matches"]) == 5
+    pairs = call("matchup", player=alcaraz, opponent="atp-206173", surface="Clay")
+    assert len(pairs["when Carlos Alcaraz serves"]) == 3
 
 
 def test_find_player_then_serve_stats():

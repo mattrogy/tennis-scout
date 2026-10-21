@@ -147,6 +147,44 @@ Each entry records **the choice**, **the alternatives** and **why**.
   `head_to_head` and `recent_form` now give tie-breaks won per player, "went to a deciding set", and summary counts
   (for example "matches with a tie-break"). The prompt now says plainly who the coach's player is, fetches that player's
   own serve and return numbers, and forbids decoding score strings.
+- **Third round:** the next report had correct facts but ignored the format and chose its own camp ("Alcaraz was named
+  first"). It came from a free question, which never sees the prompt. **Fix:** the report rules are now one shared text
+  (`REPORT_RULES`), included both in the server instructions (read for *every* question) and in the `scout_report` prompt.
+  When it is unclear which player is the coach's, Claude must ask.
+
+## 16. Strengths and weaknesses: percentile against the tour, labelled in code
+- **Choice:** every serve, return and pressure stat comes with `compared_to_tour`: the tour average, the **percentile**
+  (share of other players with a worse value) and a **label** set in code: strength (≥ 75th percentile),
+  weakness (≤ 25th), average (in between), "not enough data", or "not enough peers".
+- **Peer group:** players on the same tour, with the **same filters** (surface, period), with at least **10 matches**
+  behind the stat (10 tie-breaks or deciding sets for pressure stats). The scouted player is not counted.
+- **Minimum of 30 peers:** every comparison shows `peers`. Below 30, there is no percentile and the label is
+  "not enough peers". With narrow filters (for example grass over a few months), a percentile among a handful of players
+  would look precise but mean little.
+- **Alternatives:** a fixed gap ("3 points above the tour average"); letting the model judge.
+- **Why:** each stat has its own natural spread (1st-serve in % varies a lot between players, 2nd-serve won % much less),
+  so one fixed gap would be too strict for some stats and too loose for others. A percentile behaves the same way for every
+  stat and is easy to explain ("better than 85% of players"). Letting the model judge is exactly what the project forbids.
+- **One formula, three uses:** the same SQL and the same Python formula compute the player, every peer and the tour
+  average, so they can never be calculated differently. Test: tour 1st-serve points won + tour return points won vs
+  1st serve = 100%, because every serve point is someone's return point.
+- **No tour average for pressure stats:** every tie-break has one winner and one loser, so it is always 50%.
+  The percentile is still meaningful.
+- **Break points saved %** was added to serve stats, as the natural pair of break points converted in the `matchup` tool.
+- **`matchup` tool:** places one player's serve next to the other's return (1st serve, 2nd serve, break points), with
+  values, match counts, percentiles and labels copied from the serve and return stats. It computes no difference or "edge":
+  the model cites the pairs, it does not build them.
+- **Limit:** the peer group is every tour-level player with enough matches, not only the top 50, so top players naturally
+  rank high. A top-N peer group could come later.
+
+## 17. Default report period: the last 24 months of data
+- **Choice:** unless the user asks otherwise, reports use the last 24 months of data, computed from the database
+  (`default_report_period()`): **June 2024 – May 2026**. Every report states its period.
+- **Alternatives:** the whole history since 2015; the last 12 months.
+- **Why:** a player changes over the years, so 2016 numbers say little about the player a coach faces now. 12 months is
+  often too few matches on one surface (a clay season is only a few months). 24 months covers two full seasons on every surface.
+- **Exceptions:** head-to-head keeps all meetings since 2015 (there are few, and old meetings are still useful context).
+  Recent form stays "last 10 matches".
 
 ## 11. Ideas for V2 (not now)
 - **Coach-focused scouting:** tour averages for the same surface and period next to every stat; a coded strength/weakness
