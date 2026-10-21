@@ -20,3 +20,6 @@ wheels/
 
 # Personal Claude Code settings
 .claude/settings.local.json
+
+# Local scratch output, for checking only
+sample_report*.md
