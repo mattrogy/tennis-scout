@@ -151,6 +151,12 @@ Each entry records **the choice**, **the alternatives** and **why**.
   first"). It came from a free question, which never sees the prompt. **Fix:** the report rules are now one shared text
   (`REPORT_RULES`), included both in the server instructions (read for *every* question) and in the `scout_report` prompt.
   When it is unclear which player is the coach's, Claude must ask.
+- **Fourth round (both ways in, about 120 numbers checked):** the slash-command report had no error. The free-question
+  report had all numbers right but two slips: "the only part of his game labelled average" (three serve stats were
+  average), and "4 of the 6 tie-breaks", a total it added up itself. **Fix, again in the tools:** `labels_summary`
+  groups each answer's stats by label, so "only / all / none" claims can be copied rather than scanned for, and
+  `head_to_head` gives `tiebreaks_played`. A vague request ("Alcaraz vs Sinner on clay") correctly made Claude ask
+  which player was the coach's.
 
 ## 16. Strengths and weaknesses: percentile against the tour, labelled in code
 - **Choice:** every serve, return and pressure stat comes with `compared_to_tour`: the tour average, the **percentile**

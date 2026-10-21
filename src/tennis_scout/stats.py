@@ -244,6 +244,7 @@ def head_to_head(player_a, player_b, surface=None, date_from=None, date_to=None,
             "tiebreak_summary": {
                 "completed_matches": completed,
                 "matches_with_a_tiebreak": matches_with_tiebreak,
+                "tiebreaks_played": sum(tiebreaks.values()),
                 "tiebreaks_won": tiebreaks,
             },
             "deciding_set_summary": {
@@ -322,6 +323,14 @@ def _compare_to_tour(db, player, filters, select_sql, numbers, higher_is_better,
         entry.update(_place_among_peers(mine["values"].get(stat), mine["samples"].get(stat, 0), peer_values, higher))
         comparison[stat] = entry
     return comparison
+
+
+def _labels_summary(comparison):
+    """Group the stats by label, so a report can copy strengths and weaknesses instead of scanning for them."""
+    groups = {"strength": [], "average": [], "weakness": [], "not judged": []}
+    for stat, entry in comparison.items():
+        groups.get(entry["label"], groups["not judged"]).append(stat)
+    return groups
 
 
 COMPARISON_NOTE = (
@@ -440,6 +449,7 @@ def serve_stats(player, surface=None, date_from=None, date_to=None, db_path=None
         }
         content["compared_to_tour"] = _compare_to_tour(db, p, filters, SERVE_SQL, _serve_numbers,
                                                        SERVE_HIGHER_IS_BETTER)
+        content["labels_summary"] = _labels_summary(content["compared_to_tour"])
         content["comparison_note"] = COMPARISON_NOTE
         return _result(db, content, filters)
 
@@ -511,6 +521,7 @@ def return_stats(player, surface=None, date_from=None, date_to=None, db_path=Non
         content["totals"] = _return_totals(row)
         content["compared_to_tour"] = _compare_to_tour(db, p, filters, RETURN_SQL, _return_numbers,
                                                        RETURN_HIGHER_IS_BETTER)
+        content["labels_summary"] = _labels_summary(content["compared_to_tour"])
         content["comparison_note"] = COMPARISON_NOTE
         return _result(db, content, filters)
 
@@ -567,6 +578,9 @@ def pressure_stats(player, surface=None, date_from=None, date_to=None, db_path=N
         deciding_sets = row["deciding_sets"] or 0
         deciding_sets_won = row["deciding_sets_won"] or 0
         values = _pressure_numbers(row)["values"]
+        # No tour average here: every tie-break has a winner and a loser, so it is always 50%.
+        comparison = _compare_to_tour(db, p, filters, PRESSURE_SQL, _pressure_numbers,
+                                      PRESSURE_HIGHER_IS_BETTER, show_tour_average=False)
         content = {
             "player": p,
             "matches_found": row["found"],
@@ -590,9 +604,8 @@ def pressure_stats(player, surface=None, date_from=None, date_to=None, db_path=N
             },
             "note": "A deciding set is the last possible set (3rd of 3, 5th of 5). "
                     "A match tie-break such as [10-7] counts as a deciding set, not as a tie-break.",
-            # No tour average here: every tie-break has a winner and a loser, so it is always 50%.
-            "compared_to_tour": _compare_to_tour(db, p, filters, PRESSURE_SQL, _pressure_numbers,
-                                                 PRESSURE_HIGHER_IS_BETTER, show_tour_average=False),
+            "compared_to_tour": comparison,
+            "labels_summary": _labels_summary(comparison),
             "comparison_note": COMPARISON_NOTE + " No tour average for pressure stats: it is always 50%, "
                                "because every tie-break and deciding set has one winner and one loser.",
         }

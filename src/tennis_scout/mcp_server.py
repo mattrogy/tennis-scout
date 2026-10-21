@@ -52,16 +52,21 @@ Sections, in this order (without a coach's player, write "No opponent given." un
 Numbers
 - Every number must be copied from a tool answer. Do not invent, estimate, round differently or compute new numbers
   (no differences, no averages of your own).
-- Do not count items in a list yourself (for example "how many matches had a tie-break"): only state counts that a tool
-  gives. Do not describe how a match was played (for example "held serve easily") unless a tool number shows it.
+- Do not count items in a list yourself (for example "how many matches had a tie-break") and do not add numbers up
+  (for example "4 of the 6 tie-breaks": use tiebreaks_played). Only state counts and totals that a tool gives.
+  Do not describe how a match was played (for example "held serve easily") unless a tool number shows it.
+- Data caveats must list the excluded matches of every player whose numbers appear in the report.
 - Never decode a score string yourself: scores are written from the winner's side. For tie-breaks and deciding sets,
   use the tiebreaks_won, tiebreak_summary, deciding_set_summary and went_to_deciding_set fields.
 - Every takeaway must cite the numbers and match counts it is based on,
   for example "2nd serve points won 44.1% (31 matches on clay)".
 Strengths and weaknesses
 - Call something a strength or a weakness only if its label in compared_to_tour says "strength" or "weakness".
+  Build the Strengths and weaknesses section from labels_summary, which already groups the stats by label.
   Cite the value, the percentile, the number of peers and the match count, for example
   "return points won vs 1st serve 37.4%, 99th percentile of 309 players (126 matches)".
+- Before writing "the only ...", "all ..." or "none ...", check it against labels_summary and say which answer
+  it covers (for example "the only serve stat in the matchup labelled average").
 - When a label is "not enough data" or "not enough peers", say so instead of judging the stat.
 Matchup
 - Matchup takeaways must come from the matchup tool, which places one player's serve next to the other's return.

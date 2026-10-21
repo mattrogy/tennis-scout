@@ -90,7 +90,7 @@ def test_head_to_head_tiebreaks_are_decoded(fake_db):
     # M1 '7-6(5) 4-6 6-3' (Alpha won): Alpha wins the tie-break.
     # M2 '6-7(3) 7-6(5) 6-4' (Bravo won, so written from Bravo's side): Alpha wins TB 1, Bravo wins TB 2.
     assert result["matches"][1]["tiebreaks_won"] == {"Alpha Ace": 1, "Bravo Base": 1}
-    assert result["tiebreak_summary"] == {"completed_matches": 2, "matches_with_a_tiebreak": 2,
+    assert result["tiebreak_summary"] == {"completed_matches": 2, "matches_with_a_tiebreak": 2, "tiebreaks_played": 3,
                                           "tiebreaks_won": {"Alpha Ace": 2, "Bravo Base": 1}}
     # Both completed matches went to a 3rd set: Alpha won M1's, Bravo won M2's.
     assert result["deciding_set_summary"]["deciding_sets_won"] == {"Alpha Ace": 1, "Bravo Base": 1}
@@ -260,6 +260,26 @@ def test_compared_to_tour(fake_db, small_thresholds):
 
     bravo = stats.serve_stats(BRAVO, db_path=fake_db)["compared_to_tour"]
     assert bravo["first_serve_in_pct"]["label"] == "weakness"
+
+
+def test_labels_summary(fake_db, small_thresholds):
+    # Alpha vs Bravo (the only peer), serve, all surfaces:
+    # 1st in 61.4 vs 60.7, 1st won 74.4 vs 73.2 (60/82), bp saved 55.6 vs 54.5 (6/11): Alpha better.
+    # 2nd in 87.0 vs 94.3 (50/53), 2nd won 46.3 vs 49.1 (26/53), aces 4.0 vs 4.5, double faults 3.5 vs 1.5: Alpha worse.
+    summary = stats.serve_stats(ALPHA, db_path=fake_db)["labels_summary"]
+    assert summary == {
+        "strength": ["first_serve_in_pct", "first_serve_points_won_pct", "break_points_saved_pct"],
+        "average": [],
+        "weakness": ["second_serve_in_pct", "second_serve_points_won_pct", "aces_per_match", "double_faults_per_match"],
+        "not judged": [],
+    }
+
+
+def test_labels_summary_not_judged(fake_db):
+    # Real thresholds: 2 matches is "not enough data" for every stat.
+    summary = stats.return_stats(ALPHA, db_path=fake_db)["labels_summary"]
+    assert summary["not judged"] == list(stats.RETURN_HIGHER_IS_BETTER)
+    assert summary["strength"] == summary["weakness"] == []
 
 
 def test_pressure_comparison_has_no_tour_average(fake_db, small_thresholds):
@@ -441,3 +461,16 @@ def test_real_matchup_matches_the_separate_tools():
     assert pair["server"]["value"] == stats.serve_stats(SINNER, **filters)["serve"]["first_serve_points_won_pct"]
     assert pair["returner"]["value"] == stats.return_stats(ALCARAZ, **filters)["return"][
         "return_points_won_vs_first_serve_pct"]
+
+
+@real
+def test_real_labels_summary_alcaraz_clay():
+    """The free-form report wrote "the only part of his game labelled average": labels_summary shows three."""
+    period = stats.default_report_period()
+    result = stats.serve_stats(ALCARAZ, surface="Clay", date_from=period["date_from"], date_to=period["date_to"])
+    assert result["labels_summary"]["average"] == [
+        "second_serve_in_pct", "first_serve_points_won_pct", "double_faults_per_match",
+    ]
+    assert result["labels_summary"]["weakness"] == ["aces_per_match"]
+    h2h = stats.head_to_head(ALCARAZ, SINNER, surface="Clay")
+    assert h2h["tiebreak_summary"]["tiebreaks_played"] == 6
