@@ -18,6 +18,8 @@ You are a tennis scouting assistant for coaches. Rules:
 3. With every stat, say how many matches it is based on (matches_used), and mention excluded matches if any.
 4. Say that the data runs through May 2026 and that rankings are as of 8 June 2026.
 5. Credit the data: Jeff Sackmann, CC BY-NC-SA 4.0.
+Tools: find_player, head_to_head, serve_stats, return_stats, pressure_stats, recent_form.
+For a full scouting report, follow the scout_report prompt.
 Coverage: ATP and WTA tour-level matches since 2015. No live data, no betting advice.
 """
 
@@ -75,6 +77,91 @@ def serve_stats(
     date_from / date_to: optional, 'YYYY-MM-DD' (dates are tournament start dates).
     """
     return _run(stats.serve_stats, player=player, surface=surface, date_from=date_from, date_to=date_to)
+
+
+@server.tool()
+def return_stats(
+    player: str,
+    surface: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict[str, Any]:
+    """Return statistics for one player: return points won % against the 1st serve and against the 2nd serve,
+    and break points converted %, plus the raw totals and the number of matches used.
+
+    player: player_key from find_player. surface: optional, 'Hard', 'Clay' or 'Grass'.
+    date_from / date_to: optional, 'YYYY-MM-DD' (dates are tournament start dates).
+    """
+    return _run(stats.return_stats, player=player, surface=surface, date_from=date_from, date_to=date_to)
+
+
+@server.tool()
+def pressure_stats(
+    player: str,
+    surface: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict[str, Any]:
+    """Pressure record for one player: tie-breaks won/lost and deciding sets won/lost, read from the scores.
+
+    Completed matches only; retirements, walkovers and Next Gen Finals are skipped and counted.
+    player: player_key from find_player. surface: optional, 'Hard', 'Clay' or 'Grass'.
+    date_from / date_to: optional, 'YYYY-MM-DD'.
+    """
+    return _run(stats.pressure_stats, player=player, surface=surface, date_from=date_from, date_to=date_to)
+
+
+@server.tool()
+def recent_form(player: str, n: int = 10) -> dict[str, Any]:
+    """The player's last n tour-level matches (newest first): date, tournament, surface, opponent, score, W/L,
+    retirement marks, the win/loss record, how many of them the player retired from, and the current ranking
+    (as of 8 June 2026).
+
+    player: player_key from find_player. n: how many matches, 1 to 50 (default 10).
+    """
+    return _run(stats.recent_form, player=player, n=n)
+
+
+@server.prompt()
+def scout_report(player: str, opponent: str | None = None, surface: str | None = None) -> str:
+    """Build a scouting report on a player, for a coach preparing a match against them.
+
+    player: the player being scouted. opponent: optional, the player you are preparing (adds the head-to-head).
+    surface: optional, 'Hard', 'Clay' or 'Grass'.
+    """
+    surface_text = f"on {surface}" if surface else "on all surfaces"
+    opponent_text = f" for a match against {opponent}" if opponent else ""
+    head_to_head_step = (
+        f"- head_to_head between {player} and {opponent} (with the surface filter, then without it)\n"
+        if opponent else ""
+    )
+    return f"""Write a scouting report on {player}{opponent_text}, {surface_text}.
+
+First call find_player for each name and use the player_key it returns. Then call:
+- serve_stats, return_stats and pressure_stats for {player}{" with surface=" + surface if surface else ""}
+  (also once without the surface filter, to compare)
+{head_to_head_step}- recent_form for {player} (n=10)
+
+Use exactly these sections:
+1. Summary: three lines a coach can read in ten seconds.
+2. Serve
+3. Return
+4. Pressure (tie-breaks and deciding sets)
+5. Head-to-head{"" if opponent else " (write 'No opponent given.')"}
+6. Recent form (include the current ranking and its date)
+7. Tactical takeaways: 3 to 5 bullet points.
+8. Data caveats
+
+Rules:
+- Every number must be copied from a tool answer. Do not invent, estimate, round differently or compute new numbers
+  (no differences, no averages of your own).
+- Every takeaway must cite the numbers and match counts it is based on,
+  for example "2nd serve points won 44.1% (31 matches on clay)".
+- Takeaways are suggestions for the coach, not certainties. If a number is based on fewer than 10 matches, say it is a small sample.
+- Data caveats must say: data through May 2026 (rankings as of 8 June 2026), which matches were excluded and why,
+  that these stats cannot show shot patterns (direction, rally length), and the credit:
+  data by Jeff Sackmann, CC BY-NC-SA 4.0.
+"""
 
 
 if __name__ == "__main__":
