@@ -6,8 +6,8 @@ They use the tiny fake dataset from conftest.py, so they run without the real da
 import pytest
 
 from tennis_scout import stats
-from tennis_scout.report import (PERIOD, REPORT_RULES, SECTION_HEADINGS, REPORT_SECTIONS, check_report,
-                                 gather_report_data, perspective, report_rules)
+from tennis_scout.report import (PERIOD, REPORT_RULES, SECTION_HEADINGS, REPORT_SECTIONS, build_messages,
+                                 check_report, gather_report_data, perspective, report_rules)
 
 ALPHA, BRAVO, ZOE = "atp-1", "atp-2", "wta-10"
 
@@ -63,12 +63,31 @@ def test_report_refuses_bad_pairs(fake_db):
         gather_report_data(ALPHA, surface="Carpet", db_path=fake_db)
 
 
+def test_messages_carry_the_rules_the_perspective_and_the_answers(fake_db):
+    data = gather_report_data(ALPHA, coach=BRAVO, surface="Clay", db_path=fake_db)
+    system, user = build_messages(data)
+    assert system["role"] == "system" and user["role"] == "user"
+    assert report_rules(data["period"]) in system["content"]
+    assert "Tactical takeaways for <coach's player>" in system["content"]
+    assert user["content"].startswith("The coach's player is Bravo Base. The player being scouted is Alpha Ace.")
+    assert "Surface: Clay." in user["content"]
+    assert '"tool":"head_to_head"' in user["content"]  # the tool answers, as compact JSON
+
+
 def test_rules_are_built_from_the_period():
     assert REPORT_RULES == report_rules(PERIOD)
     fake_period = {"date_from": "2023-08-01", "date_to": "2025-07-07", "label": "August 2023 – July 2025"}
     rules = report_rules(fake_period)
     assert "August 2023 – July 2025 (date_from=2023-08-01, date_to=2025-07-07)" in rules
     assert "10. Data caveats" in rules
+    # Rules added after the Mistral Small 4 check (DECISIONS.md): each one answers an error seen in a real report.
+    assert "For the latest meeting, use most_recent_meeting" in rules
+    assert "There is no ranking per surface" in rules
+    assert "Never put a value from one answer next to a label or a match count from another" in rules
+    assert 'write "small sample" next to its numbers' in rules
+    assert "Do not give advice about shots or patterns that no number shows" in rules
+    assert "A weak return number for the coach's player is a risk, not a plan" in rules
+    assert 'Do not turn it into a rank or a group' in rules
 
 
 # ---------------------------------------------------------------- check_report (hand-written reports)
@@ -106,9 +125,12 @@ def test_invented_numbers_are_caught_even_next_to_ordinals():
 
 def test_number_formats():
     assert numbers_not_found("9,960 points, period 2024-06-01 to 2026-05-25") == []
+    assert numbers_not_found("9 960 points (9\u202f960 with a narrow space)") == []
     assert numbers_not_found("from 2024-07-01") == ["2024-07-01"]
     # Numbers inside a score are not accepted as a source: the rules forbid decoding scores.
     assert numbers_not_found("he won 7 games in the second set") == ["7"]
+    # Copying the score exactly as the tool gives it is allowed.
+    assert numbers_not_found("Lost 6-4 7-5 in the final") == []
     # List markers and the licence version are not numbers to check; R16 is a round, not a number.
     assert numbers_not_found("## 3. Return\n1. Lost in the R16\nData: CC BY-NC-SA 4.0, since 2015") == []
 
@@ -127,6 +149,14 @@ def test_a_good_report_passes():
     # Bold headings and "Head to head" without hyphens are accepted too.
     bold = full_report().replace("## 6. Head-to-head", "**6. Head to head**")
     assert check_report(bold, ANSWERS)["passed"]
+
+
+def test_blank_lines_between_sections():
+    # Real reports leave a blank line before each heading: the heading must still be read as its own line.
+    spaced = full_report().replace("\n## ", "\n\n## ")
+    assert check_report(spaced, ANSWERS)["passed"]
+    assert check_report(spaced.replace("for Sinner", "for Alcaraz"), ANSWERS)["problems"] == [
+        "The takeaways heading does not name the coach's player (Jannik Sinner)."]
 
 
 def test_missing_or_misordered_sections_fail():
