@@ -5,7 +5,9 @@ Each fact is one sentence built by code from the tool answers (for example
 strength"). The model never writes a number or a fact: it writes short headlines and cites fact IDs, and the code
 copies the cited facts word for word under each headline (see headlines.py).
 
-Every fact also has a "topic": a plain headline with no numbers, used when a model's headline is rejected.
+Every fact also has a "topic": a plain headline with no numbers, used when a model's headline is rejected, and
+its "labels": whose stat it is ("scouted" or "coach") and its label, so headlines.py can check that a headline's
+direction (praise, target, danger) matches what the facts say.
 """
 
 from tennis_scout.sections import (PRESSURE_NAMES, RETURN_NAMES, SERVE_NAMES, _answers, _comparison, _filter_label,
@@ -21,13 +23,20 @@ class FactList:
     def __init__(self):
         self.facts = []
 
-    def add(self, text, topic, kind, main=True):
-        """main=False for side facts (all-surface comparison, the coach's player) that a default summary skips."""
+    def add(self, text, topic, kind, main=True, labels=()):
+        """main=False for side facts (all-surface comparison, the coach's player) that a default summary skips.
+        labels: (player, label) pairs, for example [("scouted", "weakness")]."""
         self.facts.append({"id": f"F{len(self.facts) + 1}", "text": text, "topic": topic, "kind": kind,
-                           "main": main})
+                           "main": main, "labels": [{"player": player, "label": label} for player, label in labels]})
 
 
-def _stat_facts(facts, player, answer, values_key, names, kind, main):
+def _label(compared):
+    """strength, average or weakness; anything else ("not enough data", "not enough peers", none) is not judged."""
+    label = (compared or {}).get("label")
+    return label if label in ("strength", "average", "weakness") else "not judged"
+
+
+def _stat_facts(facts, player, answer, values_key, names, kind, main, role):
     """One fact per stat, plus one fact with the label counts of this answer."""
     where = f"{_filter_label(answer)}, {answer['matches_used']} matches"
     small = SMALL if answer["small_sample"] else ""
@@ -41,19 +50,20 @@ def _stat_facts(facts, player, answer, values_key, names, kind, main):
               f"{counts['weakness']} weakness, {counts['not judged']} not judged{small}.",
               f"How {player}'s {area} is labelled", "labels", main)
     for stat, name in names.items():
+        compared = answer["compared_to_tour"].get(stat)
         facts.add(f"{player}'s {name.lower()} ({where}): {_value(stat, answer[values_key][stat])}, "
-                  f"{_comparison(answer['compared_to_tour'].get(stat))}{small}.",
-                  f"{player}'s {area} numbers", kind, main)
+                  f"{_comparison(compared)}{small}.",
+                  f"{player}'s {area} numbers", kind, main, labels=[(role, _label(compared))])
 
 
 def _pressure_facts(facts, player, answer, main):
     where = f"{_filter_label(answer)}, {answer['matches_used']} matches"
     small = SMALL if answer["small_sample"] else ""
     for key, stat in (("tie_breaks", "tie_breaks_won_pct"), ("deciding_sets", "deciding_sets_won_pct")):
-        record = answer[key]
+        record, compared = answer[key], answer["compared_to_tour"].get(stat)
         facts.add(f"{player}'s {PRESSURE_NAMES[stat].lower()} ({where}): {record['won']} won, {record['lost']} lost, "
-                  f"{_value(stat, record['won_pct'])}, {_comparison(answer['compared_to_tour'].get(stat))}{small}.",
-                  f"{player} under pressure", "pressure", main)
+                  f"{_value(stat, record['won_pct'])}, {_comparison(compared)}{small}.",
+                  f"{player} under pressure", "pressure", main, labels=[("scouted", _label(compared))])
 
 
 def _head_to_head_facts(facts, data):
@@ -111,26 +121,28 @@ def _angle_facts(facts, data):
                 if labels != {"strength", "weakness"}:
                     continue
                 edge = server["name"] if server["label"] == "strength" else returner["name"]
+                role = {scouted["name"]: "scouted", coach["name"]: "coach"}
                 serve_value = _value(server["stat"], server["value"])
                 facts.add(f"Tactical angle ({_filter_label(matchup)}): when {server['name']} serves, "
                           f"{server['name']}'s {SERVE_NAMES[server['stat']].lower()} ({serve_value}, "
                           f"{server['label']}) meets {returner['name']}'s {RETURN_NAMES[returner['stat']].lower()} "
                           f"({_value(returner['stat'], returner['value'])}, {returner['label']}): an edge for {edge}.",
-                          "A tactical angle from the matchup", "angle")
+                          "A tactical angle from the matchup", "angle",
+                          labels=[(role[server["name"]], server["label"]), (role[returner["name"]], returner["label"])])
     for tool, values_key, names in AREAS:
         answer = _answers(data, tool, scouted["player_key"], surface=data["surface"])[0]
         for stat in answer.get("labels_summary", {}).get("weakness", []):
             facts.add(f"Tactical angle: {scouted['name']}'s {names[stat].lower()} is labelled a weakness "
                       f"({_value(stat, answer[values_key][stat])}, {_comparison(answer['compared_to_tour'][stat])}, "
                       f"{answer['matches_used']} matches): a possible target for {target_for}.",
-                      f"A weakness of {scouted['name']} to target", "angle")
+                      f"A weakness of {scouted['name']} to target", "angle", labels=[("scouted", "weakness")])
         if coach:
             own = _answers(data, tool, coach["player_key"])[0]
             for stat in own.get("labels_summary", {}).get("weakness", []):
                 facts.add(f"Tactical angle: {coach['name']}'s own {names[stat].lower()} is labelled a weakness "
                           f"({_value(stat, own[values_key][stat])}, {_comparison(own['compared_to_tour'][stat])}, "
                           f"{own['matches_used']} matches): a risk to manage.",
-                          f"A risk for {coach['name']} to manage", "angle")
+                          f"A risk for {coach['name']} to manage", "angle", labels=[("coach", "weakness")])
 
 
 def build_facts(data):
@@ -143,13 +155,13 @@ def build_facts(data):
     for tool, values_key, names in AREAS:
         for answer in _answers(data, tool, scouted["player_key"]):  # the chosen surface first, then all surfaces
             main = answer["filters"]["surface"] == data["surface"]
-            _stat_facts(facts, scouted["name"], answer, values_key, names, values_key, main)
+            _stat_facts(facts, scouted["name"], answer, values_key, names, values_key, main, "scouted")
     for answer in _answers(data, "pressure_stats", scouted["player_key"]):
         _pressure_facts(facts, scouted["name"], answer, main=answer["filters"]["surface"] == data["surface"])
     if coach:
         for tool, values_key, names in AREAS:
             _stat_facts(facts, coach["name"], _answers(data, tool, coach["player_key"])[0], values_key, names,
-                        "coach", main=False)
+                        "coach", main=False, role="coach")
     _head_to_head_facts(facts, data)
     _recent_form_facts(facts, data, scouted["name"])
     _angle_facts(facts, data)
