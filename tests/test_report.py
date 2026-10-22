@@ -6,8 +6,10 @@ They use the tiny fake dataset from conftest.py, so they run without the real da
 import pytest
 
 from tennis_scout import stats
-from tennis_scout.report import (PERIOD, REPORT_RULES, SECTION_HEADINGS, REPORT_SECTIONS, build_messages,
-                                 check_report, gather_report_data, perspective, report_rules)
+from tennis_scout.report import (PERIOD, REPORT_RULES, SECTION_HEADINGS, REPORT_SECTIONS, WEBSITE_RULES,
+                                 assemble_report, build_messages, check_report, gather_report_data, perspective,
+                                 report_rules)
+from tennis_scout.sections import render_sections
 
 ALPHA, BRAVO, ZOE = "atp-1", "atp-2", "wta-10"
 
@@ -63,15 +65,19 @@ def test_report_refuses_bad_pairs(fake_db):
         gather_report_data(ALPHA, surface="Carpet", db_path=fake_db)
 
 
-def test_messages_carry_the_rules_the_perspective_and_the_answers(fake_db):
+def test_messages_carry_the_rules_the_perspective_and_the_sections(fake_db):
     data = gather_report_data(ALPHA, coach=BRAVO, surface="Clay", db_path=fake_db)
-    system, user = build_messages(data)
-    assert system["role"] == "system" and user["role"] == "user"
-    assert report_rules(data["period"]) in system["content"]
+    sections = render_sections(data)
+    system, user = build_messages(data, sections)
+    assert system == {"role": "system", "content": WEBSITE_RULES}
     assert "Tactical takeaways for <coach's player>" in system["content"]
+    assert "not results between these two players" in system["content"]
     assert user["content"].startswith("The coach's player is Bravo Base. The player being scouted is Alpha Ace.")
     assert "Surface: Clay." in user["content"]
-    assert '"tool":"head_to_head"' in user["content"]  # the tool answers, as compact JSON
+    # The model reads the code-written sections, not raw JSON, and never sees section 1 or 9.
+    for number in (2, 3, 4, 5, 6, 7, 8, 10):
+        assert sections[number] in user["content"]
+    assert "## 1." not in user["content"] and "## 9." not in user["content"]
 
 
 def test_rules_are_built_from_the_period():
@@ -181,3 +187,14 @@ def test_without_a_coach_head_to_head_and_matchup_say_so():
     result = check_report(full_report(), alone)
     assert result["problems"] == ['Head-to-head should say "No opponent given."',
                                   'Matchup should say "No opponent given."']
+
+
+def test_stretch_and_shot_words_are_flagged_in_summary_and_takeaways_only():
+    report = full_report().replace("## 9. Tactical takeaways for Sinner\n1st serve points won 69.4%.",
+                                   "## 9. Tactical takeaways for Sinner\nAn elite server: hit deep returns, only 69.4%.")
+    report += "\nThese stats cannot show rally length or net play."  # in the Data caveats: allowed
+    problems = check_report(report, ANSWERS)["problems"]
+    assert problems == [
+        "Tactical takeaways uses 'elite', 'only 69.4%': percentiles must be written as \"Nth percentile of P players\".",
+        "Tactical takeaways uses 'deep': the data cannot show shots or patterns.",
+    ]
