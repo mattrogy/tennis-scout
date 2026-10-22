@@ -11,7 +11,7 @@ direction (praise, target, danger) matches what the facts say.
 """
 
 from tennis_scout.sections import (PRESSURE_NAMES, RETURN_NAMES, SERVE_NAMES, _answers, _comparison, _filter_label,
-                                   _value)
+                                   _value, walkovers)
 
 AREAS = (("serve_stats", "serve", SERVE_NAMES), ("return_stats", "return", RETURN_NAMES))
 SMALL = ", small sample (fewer than 10 matches)"
@@ -46,7 +46,8 @@ def _stat_facts(facts, player, answer, values_key, names, kind, main, role):
                   f"{player}'s {area} numbers", kind, main)
         return
     counts = answer["label_counts"]
-    facts.add(f"{player}'s {area} stats ({where}): {counts['strength']} labelled strength, {counts['average']} average, "
+    facts.add(f"{player}'s {area} stats ({where}): {counts['strength']} labelled strength, "
+              f"{counts['average']} average, "
               f"{counts['weakness']} weakness, {counts['not judged']} not judged{small}.",
               f"How {player}'s {area} is labelled", "labels", main)
     for stat, name in names.items():
@@ -99,7 +100,7 @@ def _recent_form_facts(facts, data, player):
     facts.add(f"{player}'s current ranking: {ranking['rank']}{points}, as of {ranking['as_of']}.",
               "Current ranking", "form")
     facts.add(f"{player}'s last {len(answer['matches'])} matches: {summary['wins']} wins, {summary['losses']} losses "
-              f"({summary['walkovers_listed_not_counted']} walkover(s) listed, not counted). {summary['retired_text']}",
+              f"({walkovers(summary['walkovers_listed_not_counted'])} listed, not counted). {summary['retired_text']}",
               "Recent form", "form")
     facts.add(f"In {player}'s last {len(answer['matches'])} matches, {summary['matches_that_went_to_a_deciding_set']} "
               f"went to a deciding set and {summary['matches_with_a_tiebreak']} had a tie-break.",

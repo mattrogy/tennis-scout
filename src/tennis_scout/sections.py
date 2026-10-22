@@ -55,6 +55,21 @@ def _comparison(compared):
     return f"{_ordinal(compared['percentile'])} percentile of {compared['peers']} players, {compared['label']}"
 
 
+def walkovers(count):
+    """'1 walkover', '0 walkovers', '2 walkovers'."""
+    return f"{count} walkover" if count == 1 else f"{count} walkovers"
+
+
+def _no_wrap(text):
+    """Keep a score or a date on one line, so a narrow table scrolls instead of splitting '6-7(5)' in two."""
+    return f'<span class="nowrap">{text}</span>'
+
+
+def _fold(summary, body):
+    """A block the reader opens on click, so side tables do not make the report twice as long."""
+    return f"<details><summary>{summary}</summary>\n\n{body}\n\n</details>"
+
+
 def _surname(name):
     return name.split()[-1]
 
@@ -83,7 +98,7 @@ def _used_line(answer):
     """'34 of 36 matches used. Excluded: 1 walkover, 1 retired or ended early, 0 with no usable stats.'"""
     excluded = answer["matches_excluded"]
     return (f"{answer['matches_used']} of {answer['matches_found']} matches used. Excluded: "
-            f"{excluded['walkover']} walkover(s), {excluded['retired_or_ended_early']} retired or ended early, "
+            f"{walkovers(excluded['walkover'])}, {excluded['retired_or_ended_early']} retired or ended early, "
             f"{excluded['no_usable_stats']} with no usable stats.")
 
 
@@ -100,13 +115,16 @@ def _stat_table(answer, values_key, names):
 
 
 def _per_filter(data, tool, render):
-    """Render the scouted player's answers: with the chosen surface first, then all surfaces (if a surface was chosen)."""
+    """Render the scouted player's answers: the chosen surface first, then all surfaces (folded) if one was chosen."""
     scouted = data["scouted_player"]["player_key"]
     blocks = []
     for answer in _answers(data, tool, scouted):
         title = f"**{data['scouted_player']['name']}, {_filter_label(answer)}, {data['period']['label']}**"
-        blocks.append("\n\n".join(part for part in (title, render(answer),
-                                                       SMALL_SAMPLE if answer["small_sample"] else "") if part))
+        block = "\n\n".join(part for part in (title, render(answer),
+                                                SMALL_SAMPLE if answer["small_sample"] else "") if part)
+        if answer["filters"]["surface"] != data["surface"]:  # the all-surface comparison, when a surface was chosen
+            block = _fold("Show the all-surface numbers, for comparison", block)
+        blocks.append(block)
     return "\n\n".join(blocks)
 
 
@@ -133,10 +151,12 @@ def _pressure_table(answer):
         lines.append(f"| {name} | {record['played']} | {record['won']} | {record['lost']} | "
                      f"{_value(stat, record['won_pct'])} | {_comparison(answer['compared_to_tour'].get(stat))} |")
     skipped = answer["matches_skipped"]
+    reasons = [walkovers(skipped["walkover"]), f"{skipped['retired_or_ended_early']} retired or ended early"]
+    if skipped["next_gen_finals_rules"]:  # only worth a mention when it happened
+        reasons.append(f"{skipped['next_gen_finals_rules']} under Next Gen Finals rules")
     lines.append("")
     lines.append(f"{answer['matches_used']} of {answer['matches_found']} matches used (completed matches only). "
-                 f"Skipped: {skipped['walkover']} walkover(s), {skipped['retired_or_ended_early']} retired or ended "
-                 f"early, {skipped['next_gen_finals_rules']} under Next Gen Finals rules.")
+                 f"Skipped: {', '.join(reasons)}.")
     return "\n".join(lines)
 
 
@@ -164,7 +184,7 @@ def strengths_section(data):
     titles = {"strength": "Strengths", "weakness": "Weaknesses", "average": "Average",
               "not judged": "Not judged (not enough data or peers)"}
     parts = [f"## 5. Strengths and weaknesses ({data['scouted_player']['name']}, "
-             f"{(data['surface'] or 'all surfaces').lower()}, from the labels only)"]
+             f"{(data['surface'] or 'all surfaces').lower()}, based on the percentiles)"]
     for label, title in titles.items():
         parts.append(f"**{title}**\n\n" + ("\n".join(groups[label]) if groups[label] else "- None."))
     return "\n\n".join(parts)
@@ -199,8 +219,8 @@ def head_to_head_section(data):
     for m in answer["matches"]:
         won = ", ".join(f"{_surname(name)} {count}" for name, count in m["tiebreaks_won"].items())
         finish = "" if m["finish"] == "completed" else f" ({m['finish']})"
-        lines.append(f"| {m['date']} | {m['tournament']} | {m['round']} | {m['surface']} | {m['winner']} | "
-                     f"{m['score']}{finish} | {won} | {'yes' if m['went_to_deciding_set'] else 'no'} |")
+        lines.append(f"| {_no_wrap(m['date'])} | {m['tournament']} | {m['round']} | {m['surface']} | {m['winner']} | "
+                     f"{_no_wrap(m['score'])}{finish} | {won} | {'yes' if m['went_to_deciding_set'] else 'no'} |")
     lines += ["", "Scores are written from the winner's side."]
     return "\n".join(lines)
 
@@ -227,13 +247,15 @@ def matchup_section(data):
                 cells.append(cell)
             lines.append(f"| {pair['about'][0].upper() + pair['about'][1:]} | {cells[0]} | {cells[1]} |")
         parts.append("\n".join(lines))
-    # The coach's player's own full serve and return numbers, so the takeaways can use them too.
+    # The coach's player's own full serve and return numbers (folded: the pairs above already show the key ones).
     coach = data["coach_player"]
+    own = []
     for tool, values_key, names in (("serve_stats", "serve", SERVE_NAMES), ("return_stats", "return", RETURN_NAMES)):
         coach_answer = _answers(data, tool, coach["player_key"])[0]
-        parts.append(f"**{coach['name']}'s own {values_key} ({_filter_label(coach_answer)})**\n\n"
-                     + _stat_table(coach_answer, values_key, names) + "\n\n" + _used_line(coach_answer)
-                     + ("\n\n" + SMALL_SAMPLE if coach_answer["small_sample"] else ""))
+        own.append(f"**{coach['name']}'s own {values_key} ({_filter_label(coach_answer)})**\n\n"
+                   + _stat_table(coach_answer, values_key, names) + "\n\n" + _used_line(coach_answer)
+                   + ("\n\n" + SMALL_SAMPLE if coach_answer["small_sample"] else ""))
+    parts.append(_fold(f"Show {coach['name']}'s own serve and return numbers", "\n\n".join(own)))
     return "\n\n".join(parts)
 
 
@@ -243,10 +265,11 @@ def recent_form_section(data):
     rank = (f"No. {ranking['rank']} ({ranking['points']} points)" if ranking["points"] is not None
             else f"{ranking['rank']}")
     lines = [
-        f"## 8. Recent form ({data['scouted_player']['name']}, last {len(answer['matches'])} matches, all surfaces)", "",
+        f"## 8. Recent form ({data['scouted_player']['name']}, last {len(answer['matches'])} matches, "
+        f"all surfaces)", "",
         f"- **Current ranking:** {rank}, as of {ranking['as_of']}.",
         f"- **Record:** {summary['wins']} wins, {summary['losses']} losses ({answer['matches_used']} matches counted; "
-        f"{summary['walkovers_listed_not_counted']} walkover(s) listed, not counted). {summary['retired_text']}",
+        f"{walkovers(summary['walkovers_listed_not_counted'])} listed, not counted). {summary['retired_text']}",
         f"- **Deciding sets:** {summary['matches_that_went_to_a_deciding_set']} of these matches went to a deciding "
         f"set. **Tie-breaks:** {summary['matches_with_a_tiebreak']} had a tie-break.",
         "",
@@ -255,8 +278,8 @@ def recent_form_section(data):
     ]
     for m in answer["matches"]:
         rank_then = m["opponent_rank_at_the_time"] if m["opponent_rank_at_the_time"] is not None else "–"
-        lines.append(f"| {m['date']} | {m['tournament']} | {m['surface']} | {m['round']} | {m['opponent']} "
-                     f"({rank_then}) | {m['result']} | {m['score']} | {m['note'] or ''} |")
+        lines.append(f"| {_no_wrap(m['date'])} | {m['tournament']} | {m['surface']} | {m['round']} | {m['opponent']} "
+                     f"({rank_then}) | {m['result']} | {_no_wrap(m['score'])} | {m['note'] or ''} |")
     lines += ["", "'ret.' = the opponent retired; 'retired' = this player retired. Scores are written from the "
                   "winner's side."]
     return "\n".join(lines)

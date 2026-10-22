@@ -49,6 +49,9 @@ Reply with JSON only, in this shape:
 - "takeaways": 3 to 5 suggestions for the coach's player (or for any coach, when there is no coach's player).
 - Each item: one short headline (at most 15 words) and the IDs of 1 to 4 facts that support it. The facts are
   shown under your headline word for word, so the headline must only say what those facts say.
+- Write each headline as a short, complete, natural English sentence that a coach would say out loud, with
+  possessives and a verb: "<player>'s second serve is a danger", "Expect long service games from <player>",
+  not a list of words such as "Use <player> break points converted".
 - Headlines contain NO numbers and no digits, no dates and no months. Do not use: every, all, none, always, never,
   elite, best, worst, strongest, weakest, top. Do not give advice about shots, spin, depth, placement, rallies or net
   play. Do not name any player other than the two players of the report.
@@ -134,7 +137,7 @@ def headline_problem(item, data, fact_ids):
 
     fact_ids: the report's facts by ID.
     """
-    if not isinstance(item, dict) or not isinstance(item.get("headline"), str) or not isinstance(item.get("facts"), list):
+    if not (isinstance(item, dict) and isinstance(item.get("headline"), str) and isinstance(item.get("facts"), list)):
         return "not a headline with a list of facts"
     headline, cited = item["headline"].strip(), item["facts"]
     if not headline:
