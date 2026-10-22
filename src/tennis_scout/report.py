@@ -4,7 +4,10 @@ Used by both the MCP server (Claude Code, Claude Desktop) and the website, so a 
 the same rules and relies on the same numbers wherever it is written.
 """
 
+import re
+
 from tennis_scout import stats
+from tennis_scout.db import normalize_name
 
 
 def _default_period(db_path=None):
@@ -34,6 +37,12 @@ REPORT_SECTIONS = [
     "Recent form (scouted player, last 10 matches, with the current ranking and its date)",
     "Tactical takeaways for the coach's player: 3 to 5 bullet points",
     "Data caveats",
+]
+
+# The words each section heading must contain, in the same order as REPORT_SECTIONS (used by check_report).
+SECTION_HEADINGS = [
+    "Summary", "Serve", "Return", "Pressure", "Strengths and weaknesses",
+    "Head-to-head", "Matchup", "Recent form", "Tactical takeaways", "Data caveats",
 ]
 
 
@@ -142,4 +151,108 @@ def gather_report_data(scouted, coach=None, surface=None, db_path=None):
         "period": period,
         "perspective": perspective(scouted_player["name"], coach_player["name"] if coach_player else None),
         "tool_answers": tool_answers,
+    }
+
+
+# ---------------------------------------------------------------- checking a written report
+
+# Numbers a report may use that are not in the tool answers: "since 2015" (from the rules) and "CC BY-NC-SA 4.0".
+ALLOWED_NUMBERS = {2015, 4.0}
+
+# A number as written in a report: an ISO date (2024-06-01), or a number such as 69.4, 9,960 or 99th.
+# Digits glued to a letter or a dot (R16, v1.2) are skipped by the (?<![\w.]) part.
+NUMBER_PATTERN = re.compile(
+    r"(?<![\w.])(?:(?P<date>\d{4}-\d{2}-\d{2})"
+    r"|(?P<number>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(?P<ordinal>st|nd|rd|th)?)(?!\d)"
+)
+# "1st serve" and "2nd serve" are names of stats, not numbers to check.
+SERVE_NAME = re.compile(r"[\s-]+serve", re.IGNORECASE)
+# List and heading markers such as "1. ", "## 9. " or "**3.** " at the start of a line.
+LIST_MARKER = re.compile(r"^(\s*(?:#{1,6}\s*)?(?:\*\*)?)\d{1,2}[.)]", re.MULTILINE)
+
+
+def _numbers_in(text):
+    """Every number written in a text, as (as_written, value). Dates keep their text; other values are floats."""
+    found = []
+    for match in NUMBER_PATTERN.finditer(text):
+        if match["date"]:
+            found.append((match["date"], match["date"]))
+        elif match["ordinal"] and match["number"] in ("1", "2") and SERVE_NAME.match(text, match.end()):
+            continue  # "1st serve" / "2nd serve"
+        else:
+            found.append((match[0], float(match["number"].replace(",", ""))))
+    return found
+
+
+def _numbers_in_answers(value, key=None):
+    """Every number in the tool answers. Score strings are skipped: the rules forbid reading numbers from them."""
+    if key == "score" or value is None or isinstance(value, bool):
+        return set()
+    if isinstance(value, (int, float)):
+        return {float(value)}
+    if isinstance(value, str):
+        return {number for _, number in _numbers_in(value)}
+    if isinstance(value, dict):
+        return set().union(*(_numbers_in_answers(v, k) for k, v in value.items()))
+    if isinstance(value, list):
+        return set().union(*(_numbers_in_answers(v) for v in value))
+    return set()
+
+
+def _heading_lines(text):
+    """Where each section heading starts (for example "## 3. Return" or "**3. Return**"), or None if missing."""
+    positions = []
+    for number, heading in enumerate(SECTION_HEADINGS, start=1):
+        words = r"[- ]".join(re.escape(word) for word in re.split(r"[- ]", heading))  # "Head to head" is fine too
+        pattern = rf"^\s*(?:#{{1,6}}\s*)?(?:\*\*)?{number}[.)]\s*(?:\*\*)?\s*{words}"
+        match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+        positions.append(match.start() if match else None)
+    return positions
+
+
+def _section_text(text, positions, index):
+    """The text of one section: from its heading to the next heading found."""
+    later = [p for p in positions[index + 1:] if p is not None]
+    return text[positions[index]:later[0] if later else len(text)]
+
+
+def check_report(text, data):
+    """Check a written report against the tool answers it was written from.
+
+    - every number in the text must appear somewhere in the tool answers (or in ALLOWED_NUMBERS);
+    - the 10 sections must be there, in order;
+    - the takeaways must be for the coach's player; without one, Head-to-head and Matchup say "No opponent given."
+
+    Limit: this proves each number exists in the answers, not that it is cited in the right place.
+    """
+    known = _numbers_in_answers(data) | ALLOWED_NUMBERS
+    without_markers = LIST_MARKER.sub(r"\1", text)
+    numbers_not_found = [written for written, value in _numbers_in(without_markers) if value not in known]
+
+    problems = []
+    positions = _heading_lines(text)
+    for heading, position in zip(SECTION_HEADINGS, positions):
+        if position is None:
+            problems.append(f"Missing section: {heading}.")
+    found = [p for p in positions if p is not None]
+    if found != sorted(found):
+        problems.append("The sections are not in the expected order.")
+
+    takeaways, head_to_head, matchup_ = (SECTION_HEADINGS.index(name) for name in
+                                         ("Tactical takeaways", "Head-to-head", "Matchup"))
+    coach = data.get("coach_player")
+    if coach and positions[takeaways] is not None:
+        heading_line = text[positions[takeaways]:].splitlines()[0]
+        surname = normalize_name(coach["name"]).split()[-1]
+        if surname not in normalize_name(heading_line):
+            problems.append(f"The takeaways heading does not name the coach's player ({coach['name']}).")
+    if not coach:
+        for index in (head_to_head, matchup_):
+            if positions[index] is not None and "No opponent given." not in _section_text(text, positions, index):
+                problems.append(f'{SECTION_HEADINGS[index]} should say "No opponent given."')
+
+    return {
+        "passed": not numbers_not_found and not problems,
+        "numbers_not_found": numbers_not_found,
+        "problems": problems,
     }

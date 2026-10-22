@@ -6,7 +6,8 @@ They use the tiny fake dataset from conftest.py, so they run without the real da
 import pytest
 
 from tennis_scout import stats
-from tennis_scout.report import REPORT_RULES, PERIOD, perspective, report_rules, gather_report_data
+from tennis_scout.report import (PERIOD, REPORT_RULES, SECTION_HEADINGS, REPORT_SECTIONS, check_report,
+                                 gather_report_data, perspective, report_rules)
 
 ALPHA, BRAVO, ZOE = "atp-1", "atp-2", "wta-10"
 
@@ -68,3 +69,85 @@ def test_rules_are_built_from_the_period():
     rules = report_rules(fake_period)
     assert "August 2023 – July 2025 (date_from=2023-08-01, date_to=2025-07-07)" in rules
     assert "10. Data caveats" in rules
+
+
+# ---------------------------------------------------------------- check_report (hand-written reports)
+
+ANSWERS = {
+    "scouted_player": {"name": "Carlos Alcaraz"},
+    "coach_player": {"name": "Jannik Sinner"},
+    "period": {"date_from": "2024-06-01", "date_to": "2026-05-25"},
+    "tool_answers": [{"tool": "serve_stats", "answer": {
+        "serve": {"first_serve_points_won_pct": 69.4, "second_serve_points_won_pct": 55.0},
+        "compared_to_tour": {"first_serve_points_won_pct": {"percentile": 99, "peers": 108}},
+        "matches_used": 34,
+        "points": 9960,
+        "score": "6-4 7-5",  # scores are not a source of numbers
+    }}],
+}
+
+
+def numbers_not_found(text, data=ANSWERS):
+    return check_report(text, data)["numbers_not_found"]
+
+
+def test_ordinal_stat_names_are_not_numbers():
+    # "1st serve" and "2nd serve" are names: no invented 1 or 2.
+    assert numbers_not_found("1st serve points won 69.4% (34 matches)") == []
+    assert numbers_not_found("2nd serve points won 55.0%, and 1st-serve points 69.4%") == []
+
+
+def test_invented_numbers_are_caught_even_next_to_ordinals():
+    assert numbers_not_found("1st serve points won 71.2% (34 matches)") == ["71.2"]
+    assert numbers_not_found("99th percentile of 108 players") == []
+    assert numbers_not_found("12th percentile of 108 players") == ["12th"]
+    assert numbers_not_found("3rd serve") == ["3rd"]  # only 1st and 2nd serve are stat names
+
+
+def test_number_formats():
+    assert numbers_not_found("9,960 points, period 2024-06-01 to 2026-05-25") == []
+    assert numbers_not_found("from 2024-07-01") == ["2024-07-01"]
+    # Numbers inside a score are not accepted as a source: the rules forbid decoding scores.
+    assert numbers_not_found("he won 7 games in the second set") == ["7"]
+    # List markers and the licence version are not numbers to check; R16 is a round, not a number.
+    assert numbers_not_found("## 3. Return\n1. Lost in the R16\nData: CC BY-NC-SA 4.0, since 2015") == []
+
+
+def full_report(takeaways_for="Sinner", sections=SECTION_HEADINGS, opponent_text="Alcaraz leads 34 matches."):
+    lines = []
+    for number, heading in enumerate(sections, start=1):
+        lines.append(f"## {number}. {heading}" + (f" for {takeaways_for}" if heading == "Tactical takeaways" else ""))
+        lines.append(opponent_text if heading in ("Head-to-head", "Matchup") else "1st serve points won 69.4%.")
+    return "\n".join(lines)
+
+
+def test_a_good_report_passes():
+    assert len(SECTION_HEADINGS) == len(REPORT_SECTIONS)
+    assert check_report(full_report(), ANSWERS) == {"passed": True, "numbers_not_found": [], "problems": []}
+    # Bold headings and "Head to head" without hyphens are accepted too.
+    bold = full_report().replace("## 6. Head-to-head", "**6. Head to head**")
+    assert check_report(bold, ANSWERS)["passed"]
+
+
+def test_missing_or_misordered_sections_fail():
+    without_pressure = [h for h in SECTION_HEADINGS if h != "Pressure"]
+    result = check_report(full_report(sections=without_pressure), ANSWERS)
+    assert not result["passed"]
+    assert "Missing section: Pressure." in result["problems"]
+
+    swapped = full_report().replace("## 2. Serve", "## X").replace("## 3. Return", "## 2. Serve")
+    swapped = swapped.replace("## X", "## 3. Return")
+    assert "The sections are not in the expected order." in check_report(swapped, ANSWERS)["problems"]
+
+
+def test_wrong_camp_fails():
+    result = check_report(full_report(takeaways_for="Alcaraz"), ANSWERS)
+    assert result["problems"] == ["The takeaways heading does not name the coach's player (Jannik Sinner)."]
+
+
+def test_without_a_coach_head_to_head_and_matchup_say_so():
+    alone = {**ANSWERS, "coach_player": None}
+    assert check_report(full_report(opponent_text="No opponent given."), alone)["passed"]
+    result = check_report(full_report(), alone)
+    assert result["problems"] == ['Head-to-head should say "No opponent given."',
+                                  'Matchup should say "No opponent given."']
