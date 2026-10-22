@@ -1,12 +1,14 @@
-"""Pre-launch check of the writer model: write real reports and run the automatic checks on them.
+"""Pre-launch check of the writer model: write real website reports and run the automatic checks on them.
 
-Uses the real database and your OpenRouter key from .env (never printed). Each report and the tool
-answers it was written from are saved in checks/ (git-ignored), for the manual read.
+Uses the real database and your OpenRouter key from .env (never printed). Each report is built exactly as the
+website builds it: sections 2-8 and 10 by code, sections 1 and 9 by the model. Saved in checks/<model>/
+(git-ignored) for the manual read: the full report, the model's own reply, and the tool answers.
 
 Usage:
     uv run python scripts/check_reports.py                    # all cases, with the website's model (llm.MODEL)
     uv run python scripts/check_reports.py 2 5                # only cases 2 and 5
-    uv run python scripts/check_reports.py --model anthropic/claude-haiku-5.5   # try another model (testing only)
+    uv run python scripts/check_reports.py --models mistralai/mistral-large-4-0 anthropic/claude-sonnet-5.5
+                                                              # compare models (testing only), all in parallel
 """
 
 import argparse
@@ -16,7 +18,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from tennis_scout import llm
-from tennis_scout.report import build_messages, check_report, gather_report_data
+from tennis_scout.report import assemble_report, build_messages, check_report, gather_report_data
+from tennis_scout.sections import render_sections
 
 CHECKS_DIR = Path(__file__).resolve().parent.parent / "checks"
 
@@ -30,6 +33,10 @@ CASES = [
     ("wta-259799", "wta-202468", None, "no head-to-head (Andreeva scouted for Pegula)"),
 ]
 
+# Testing only: models whose thinking cannot be turned off get a low effort and room to think.
+MODEL_SETTINGS = {
+    "anthropic/claude-sonnet-5.5": {"reasoning_effort": "low", "max_tokens": 8000},
+}
 
 BUSY_ATTEMPTS = 3      # this script only: the website never waits and retries
 BUSY_WAIT_SECONDS = 30
@@ -39,57 +46,80 @@ def write_with_patience(messages, model):
     """Ask for a report; if the model is busy, wait and try again a few times."""
     for attempt in range(1, BUSY_ATTEMPTS + 1):
         try:
-            return llm.write_report(messages, model=model)
+            return llm.write_report(messages, model=model, **MODEL_SETTINGS.get(model, {}))
         except llm.ModelBusy:
             if attempt == BUSY_ATTEMPTS:
                 raise
-            print(f"  (a case waits {BUSY_WAIT_SECONDS} s: model busy, attempt {attempt} of {BUSY_ATTEMPTS})")
+            print(f"  ({model}: a case waits {BUSY_WAIT_SECONDS} s, model busy, attempt {attempt} of {BUSY_ATTEMPTS})")
             time.sleep(BUSY_WAIT_SECONDS)
 
 
-def run_case(model, out_dir, number, scouted, coach, surface, about):
-    """Write and check one report. Returns (passed, the lines to print)."""
-    lines = [f"\nCase {number}: {about}"]
+def run_case(model, number):
+    """Build and check one report, the way the website does. Returns a dict of results."""
+    scouted, coach, surface, about = CASES[number - 1]
+    out_dir = CHECKS_DIR / model.replace("/", "_")
+    result = {"model": model, "number": number, "about": about, "passed": False}
+    started = time.perf_counter()  # everything a visitor waits for: database, sections, model, check
     data = gather_report_data(scouted, coach=coach, surface=surface)
-    started = time.perf_counter()
+    sections = render_sections(data)
     try:
-        reply = write_with_patience(build_messages(data), model)
+        reply = write_with_patience(build_messages(data, sections), model)
     except Exception as error:  # testing script only: one failed case must not hide the other cases' results
-        return False, lines + [f"  not written: {type(error).__name__}: {error}"]
-    seconds = time.perf_counter() - started
-    check = check_report(reply["text"], data)
+        result["error"] = f"{type(error).__name__}: {error}"
+        return result
+    report = assemble_report(sections, reply["text"])
+    check = check_report(report, data)
+    result.update(check, seconds=time.perf_counter() - started, reply=reply)
 
-    (out_dir / f"{number}.md").write_text(reply["text"], encoding="utf-8")
+    (out_dir / f"{number}.md").write_text(report, encoding="utf-8")
+    (out_dir / f"{number}-model-reply.md").write_text(reply["text"], encoding="utf-8")
     (out_dir / f"{number}-tool-answers.json").write_text(json.dumps(data, ensure_ascii=False, indent=1),
                                                          encoding="utf-8")
-    return check["passed"], lines + [
-        f"  passed: {check['passed']}",
-        f"  numbers not found: {check['numbers_not_found'] or 'none'}",
-        f"  problems: {check['problems'] or 'none'}",
-        f"  model: {reply['model']}, finish: {reply['finish_reason']}, {seconds:.0f} s, "
-        f"tokens in/out: {reply['input_tokens']}/{reply['output_tokens']} "
-        f"(of which reasoning: {reply['reasoning_tokens']})",
-    ]
+    return result
+
+
+def print_result(result):
+    print(f"\n[{result['model']}] Case {result['number']}: {result['about']}")
+    if "error" in result:
+        print(f"  not written: {result['error']}")
+        return
+    reply = result["reply"]
+    cost = f"${reply['cost_usd']:.4f}" if reply["cost_usd"] is not None else "cost not given"
+    print(f"  passed: {result['passed']}")
+    print(f"  numbers not found: {result['numbers_not_found'] or 'none'}")
+    print(f"  problems: {result['problems'] or 'none'}")
+    print(f"  {result['seconds']:.1f} s in total, {cost}, finish: {reply['finish_reason']}, "
+          f"tokens in/out: {reply['input_tokens']}/{reply['output_tokens']} (of which thinking: "
+          f"{reply['reasoning_tokens']})")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Write real reports and check them.")
+    parser = argparse.ArgumentParser(description="Write real website reports and check them.")
     parser.add_argument("cases", nargs="*", type=int, help="case numbers (default: all)")
-    parser.add_argument("--model", default=llm.MODEL, help=f"OpenRouter model ID (default: {llm.MODEL})")
+    parser.add_argument("--models", nargs="+", default=[llm.MODEL],
+                        help=f"OpenRouter model IDs (default: the website's model, {llm.MODEL})")
     args = parser.parse_args()
 
-    # One folder per model, so a comparison never overwrites the other model's reports.
-    out_dir = CHECKS_DIR / args.model.replace("/", "_")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    numbers = args.cases or range(1, len(CASES) + 1)
-    print(f"Writer model: {args.model}. Writing {len(numbers)} reports at the same time...")
-    # All cases at once: the run takes about as long as the slowest report, not the sum of all of them.
-    with ThreadPoolExecutor(max_workers=len(numbers)) as pool:
-        results = list(pool.map(lambda number: run_case(args.model, out_dir, number, *CASES[number - 1]), numbers))
-    for _, lines in results:
-        print("\n".join(lines))
-    passed = sum(1 for ok, _ in results if ok)
-    print(f"\n{passed} of {len(results)} reports passed the automatic checks. Reports saved in {out_dir}/")
+    numbers = args.cases or list(range(1, len(CASES) + 1))
+    for model in args.models:
+        (CHECKS_DIR / model.replace("/", "_")).mkdir(parents=True, exist_ok=True)
+    jobs = [(model, number) for model in args.models for number in numbers]
+    print(f"Writing {len(jobs)} reports at the same time ({len(args.models)} model(s) x {len(numbers)} cases)...")
+    # Every report at once: the run takes about as long as the slowest report, not the sum of all of them.
+    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        results = list(pool.map(lambda job: run_case(*job), jobs))
+
+    for result in results:
+        print_result(result)
+    print("\nPer model:")
+    for model in args.models:
+        done = [r for r in results if r["model"] == model and "error" not in r]
+        costs = [r["reply"]["cost_usd"] for r in done if r["reply"]["cost_usd"] is not None]
+        seconds = [r["seconds"] for r in done]
+        print(f"  {model}: {sum(r['passed'] for r in done)} of {len(numbers)} passed the automatic checks"
+              + (f", {sum(seconds) / len(seconds):.1f} s on average (slowest {max(seconds):.1f} s)" if seconds else "")
+              + (f", ${sum(costs) / len(costs):.4f} per report on average" if costs else ""))
+    print(f"\nReports saved in {CHECKS_DIR}/")
 
 
 if __name__ == "__main__":
