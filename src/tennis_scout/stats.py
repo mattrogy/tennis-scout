@@ -340,6 +340,11 @@ def _labels_summary(comparison):
     return groups
 
 
+def _label_counts(groups):
+    """How many stats carry each label, so "all", "none" or "only" claims can be checked against a number."""
+    return {label: len(stats) for label, stats in groups.items()}
+
+
 COMPARISON_NOTE = (
     f"Compared with the other players on the same tour, with the same filters, who have at least {MIN_MATCHES} "
     f"matches behind the stat. percentile = share of those players with a worse value. Labels: strength "
@@ -458,6 +463,7 @@ def serve_stats(player, surface=None, date_from=None, date_to=None, db_path=None
         content["compared_to_tour"] = _compare_to_tour(db, p, filters, SERVE_SQL, _serve_numbers,
                                                        SERVE_HIGHER_IS_BETTER)
         content["labels_summary"] = _labels_summary(content["compared_to_tour"])
+        content["label_counts"] = _label_counts(content["labels_summary"])
         content["comparison_note"] = COMPARISON_NOTE
         return _result(db, content, filters)
 
@@ -531,6 +537,7 @@ def return_stats(player, surface=None, date_from=None, date_to=None, db_path=Non
         content["compared_to_tour"] = _compare_to_tour(db, p, filters, RETURN_SQL, _return_numbers,
                                                        RETURN_HIGHER_IS_BETTER)
         content["labels_summary"] = _labels_summary(content["compared_to_tour"])
+        content["label_counts"] = _label_counts(content["labels_summary"])
         content["comparison_note"] = COMPARISON_NOTE
         return _result(db, content, filters)
 
@@ -616,6 +623,7 @@ def pressure_stats(player, surface=None, date_from=None, date_to=None, db_path=N
                     "A match tie-break such as [10-7] counts as a deciding set, not as a tie-break.",
             "compared_to_tour": comparison,
             "labels_summary": _labels_summary(comparison),
+            "label_counts": _label_counts(_labels_summary(comparison)),
             "comparison_note": COMPARISON_NOTE + " No tour average for pressure stats: it is always 50%, "
                                "because every tie-break and deciding set has one winner and one loser.",
         }

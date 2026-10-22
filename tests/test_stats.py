@@ -304,6 +304,8 @@ def test_labels_summary(fake_db, small_thresholds):
         "weakness": ["second_serve_in_pct", "second_serve_points_won_pct", "aces_per_match", "double_faults_per_match"],
         "not judged": [],
     }
+    counts = stats.serve_stats(ALPHA, db_path=fake_db)["label_counts"]
+    assert counts == {"strength": 3, "average": 0, "weakness": 4, "not judged": 0}
 
 
 def test_labels_summary_not_judged(fake_db):
