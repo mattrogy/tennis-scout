@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from openai import APIStatusError, OpenAI, RateLimitError
 
 MODEL = "mistralai/mistral-large-4-0"  # Mistral Large 4 (Mistral Small 4 failed the pre-launch check)
-MAX_TOKENS = 2000        # the model writes only the Summary and the Takeaways (well under 1,000 tokens)
+MAX_TOKENS = 2000        # the model writes only short headlines and fact IDs (well under 1,000 tokens)
 # Mistral Large 4 can "think" before writing, and on OpenRouter those thinking tokens count against MAX_TOKENS.
 # With thinking on, it used all 3,000 tokens thinking and returned an empty report. "none" turns it off.
 REASONING_EFFORT = "none"
@@ -40,17 +40,21 @@ def _client():
     return OpenAI(base_url=OPENROUTER_URL, api_key=key, timeout=TIMEOUT_SECONDS, max_retries=1)
 
 
-def write_report(messages, model=MODEL, reasoning_effort=REASONING_EFFORT, max_tokens=MAX_TOKENS):
+def write_report(messages, model=MODEL, reasoning_effort=REASONING_EFFORT, max_tokens=MAX_TOKENS,
+                 response_format=None):
     """Send the messages to the model; return the text and what the call used (tokens, cost in US dollars).
 
     The website always uses the defaults. Only scripts/check_reports.py passes other values, to compare models
     before launch (some models, such as Claude Sonnet 5.5, cannot turn their thinking off).
+    response_format: optional, a JSON schema the reply must follow (the website asks for headlines this way).
     """
     try:
         # Temperature 0 (least creative) only without thinking: Anthropic models refuse it when thinking is on.
-        temperature = {"temperature": 0} if reasoning_effort == "none" else {}
+        options = {"temperature": 0} if reasoning_effort == "none" else {}
+        if response_format:
+            options["response_format"] = response_format
         response = _client().chat.completions.create(
-            model=model, messages=messages, max_tokens=max_tokens, **temperature,
+            model=model, messages=messages, max_tokens=max_tokens, **options,
             extra_body={"reasoning": {"effort": reasoning_effort}},  # an OpenRouter option, not in the OpenAI SDK
         )
     except RateLimitError as error:  # 429, for example "temporarily rate-limited upstream"

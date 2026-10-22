@@ -6,10 +6,8 @@ They use the tiny fake dataset from conftest.py, so they run without the real da
 import pytest
 
 from tennis_scout import stats
-from tennis_scout.report import (PERIOD, REPORT_RULES, SECTION_HEADINGS, REPORT_SECTIONS, WEBSITE_RULES,
-                                 assemble_report, build_messages, check_report, gather_report_data, perspective,
-                                 report_rules)
-from tennis_scout.sections import render_sections
+from tennis_scout.report import (PERIOD, REPORT_RULES, SECTION_HEADINGS, REPORT_SECTIONS, check_report,
+                                 gather_report_data, perspective, report_rules)
 
 ALPHA, BRAVO, ZOE = "atp-1", "atp-2", "wta-10"
 
@@ -63,21 +61,6 @@ def test_report_refuses_bad_pairs(fake_db):
         gather_report_data("atp-999", db_path=fake_db)
     with pytest.raises(stats.StatsError, match="Surface must be one of"):
         gather_report_data(ALPHA, surface="Carpet", db_path=fake_db)
-
-
-def test_messages_carry_the_rules_the_perspective_and_the_sections(fake_db):
-    data = gather_report_data(ALPHA, coach=BRAVO, surface="Clay", db_path=fake_db)
-    sections = render_sections(data)
-    system, user = build_messages(data, sections)
-    assert system == {"role": "system", "content": WEBSITE_RULES}
-    assert "Tactical takeaways for <coach's player>" in system["content"]
-    assert "not results between these two players" in system["content"]
-    assert user["content"].startswith("The coach's player is Bravo Base. The player being scouted is Alpha Ace.")
-    assert "Surface: Clay." in user["content"]
-    # The model reads the code-written sections, not raw JSON, and never sees section 1 or 9.
-    for number in (2, 3, 4, 5, 6, 7, 8, 10):
-        assert sections[number] in user["content"]
-    assert "## 1." not in user["content"] and "## 9." not in user["content"]
 
 
 def test_rules_are_built_from_the_period():
