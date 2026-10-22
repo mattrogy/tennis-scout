@@ -10,78 +10,9 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from tennis_scout import stats
+# The report rules live in report.py, shared with the website. REPORT_SECTIONS is imported for the tests.
+from tennis_scout.report import PERIOD, PERIOD_ARGS, REPORT_RULES, REPORT_SECTIONS, perspective  # noqa: F401
 
-
-def _default_period():
-    """The default report period (last 24 months of data), read from the database once at start-up."""
-    try:
-        return stats.default_report_period()
-    except FileNotFoundError:  # database not built yet: the tools will explain that when called
-        return {"date_from": None, "date_to": None, "label": "the last 24 months of data"}
-
-
-PERIOD = _default_period()
-PERIOD_ARGS = f"date_from={PERIOD['date_from']}, date_to={PERIOD['date_to']}"
-
-REPORT_SECTIONS = [
-    "Summary: three lines a coach can read in ten seconds, including the period covered",
-    "Serve (scouted player)",
-    "Return (scouted player)",
-    "Pressure (scouted player: tie-breaks and deciding sets)",
-    "Strengths and weaknesses (scouted player, from the labels only)",
-    "Head-to-head (all meetings since 2015)",
-    "Matchup (from the matchup tool)",
-    "Recent form (scouted player, last 10 matches, with the current ranking and its date)",
-    "Tactical takeaways for the coach's player: 3 to 5 bullet points",
-    "Data caveats",
-]
-
-# One set of rules for every scouting report, whether it comes from a free question or from the scout_report prompt.
-REPORT_RULES = f"""\
-HOW TO WRITE A SCOUTING REPORT
-Perspective
-- A scouting report is about the player the coach will face (the scouted player), written for the coach of
-  their own player (the coach's player).
-- If two players are named and it is not clear which one is the coach's own player, ask before writing.
-Period
-- Use the default period, {PERIOD['label']} ({PERIOD_ARGS}), for serve_stats, return_stats, pressure_stats and
-  matchup, unless the user asks for another period. State the period in the Summary and in the Data caveats.
-- head_to_head uses no date filter (all meetings since 2015). recent_form is the last 10 matches.
-Sections, in this order (without a coach's player, write "No opponent given." under Head-to-head and Matchup):
-""" + "\n".join(f"{number}. {section}" for number, section in enumerate(REPORT_SECTIONS, start=1)) + """
-Numbers
-- Every number must be copied from a tool answer. Do not invent, estimate, round differently or compute new numbers
-  (no differences, no averages of your own).
-- Do not count items in a list yourself (for example "how many matches had a tie-break") and do not add numbers up
-  (for example "4 of the 6 tie-breaks": use tiebreaks_played). Only state counts and totals that a tool gives.
-  Do not describe how a match was played (for example "held serve easily") unless a tool number shows it.
-- Data caveats must list the excluded matches of every player whose numbers appear in the report.
-- Never decode a score string yourself: scores are written from the winner's side. For tie-breaks and deciding sets,
-  use the tiebreaks_won, tiebreak_summary, deciding_set_summary and went_to_deciding_set fields.
-- Every takeaway must cite the numbers and match counts it is based on,
-  for example "2nd serve points won 44.1% (31 matches on clay)".
-Strengths and weaknesses
-- Call something a strength or a weakness only if its label in compared_to_tour says "strength" or "weakness".
-  Build the Strengths and weaknesses section from labels_summary, which already groups the stats by label.
-  Cite the value, the percentile, the number of peers and the match count, for example
-  "return points won vs 1st serve 37.4%, 99th percentile of 309 players (126 matches)".
-- Before writing "the only ...", "all ..." or "none ...", check it against labels_summary and say which answer
-  it covers (for example "the only serve stat in the matchup labelled average").
-- When a label is "not enough data" or "not enough peers", say so instead of judging the stat.
-Matchup
-- Matchup takeaways must come from the matchup tool, which places one player's serve next to the other's return.
-  Do not build your own comparison from two separate tables.
-Takeaways
-- Takeaways are suggestions for the coach, not certainties. If a number is based on fewer than 10 matches,
-  say it is a small sample.
-- Before writing, check each takeaway against the numbers you received: a takeaway must not contradict them.
-Data caveats must say
-- the period used, and "data through May 2026" (rankings as of 8 June 2026);
-- which matches were excluded and why;
-- that percentiles compare with tour-level players who have at least 10 matches with the same filters;
-- that these stats cannot show shot patterns (direction, rally length);
-- the credit: data by Jeff Sackmann, CC BY-NC-SA 4.0.
-"""
 
 INSTRUCTIONS = f"""\
 You are a tennis scouting assistant for coaches.
@@ -231,19 +162,15 @@ def scout_report(player: str, opponent: str | None = None, surface: str | None =
     """
     filters = (f"surface={surface}, " if surface else "") + PERIOD_ARGS
     if opponent:
-        perspective = (f"The coach's player is {opponent}. The player being scouted is {player}.\n"
-                       f"Write everything for {opponent}'s coach: how {opponent} can play against {player}.")
         extra_calls = (f"- head_to_head between {player} and {opponent} (with the surface filter if any, no dates)\n"
                        f"- matchup with player={player}, opponent={opponent} ({filters})\n"
                        f"- serve_stats and return_stats for {opponent} ({filters})\n")
     else:
-        perspective = (f"The player being scouted is {player}. Write everything for a coach preparing a match "
-                       f"against {player}.")
         extra_calls = ""
 
     return f"""Write a scouting report on {player}, {"on " + surface if surface else "on all surfaces"}, \
 for the period {PERIOD['label']}.
-{perspective}
+{perspective(player, opponent)}
 
 First call find_player for each name and use the player_key it returns. Then call:
 - serve_stats, return_stats and pressure_stats for {player} ({filters})
