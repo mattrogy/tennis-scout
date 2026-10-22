@@ -1,8 +1,10 @@
 """Pre-launch check of the writer model: write real website reports and run the automatic checks on them.
 
 Uses the real database and your OpenRouter key from .env (never printed). Each report is built exactly as the
-website builds it: sections 2-8 and 10 by code, sections 1 and 9 by the model. Saved in checks/<model>/
-(git-ignored) for the manual read: the full report, the model's own reply, and the tool answers.
+website builds it: sections 2-8 and 10 by code; for sections 1 and 9 the model only returns headlines (no numbers)
+with the IDs of the verified facts that support them, and the code copies those facts under each headline.
+Saved in checks/<model>/ (git-ignored) for the manual read: the full report, the model's reply, the facts,
+the log of replaced headlines, and the tool answers.
 
 Usage:
     uv run python scripts/check_reports.py                    # all cases, with the website's model (llm.MODEL)
@@ -18,7 +20,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from tennis_scout import llm
-from tennis_scout.report import assemble_report, build_messages, check_report, gather_report_data
+from tennis_scout.facts import build_facts
+from tennis_scout.headlines import RESPONSE_FORMAT, build_messages, write_sections
+from tennis_scout.report import assemble_report, check_report, gather_report_data
 from tennis_scout.sections import render_sections
 
 CHECKS_DIR = Path(__file__).resolve().parent.parent / "checks"
@@ -46,7 +50,8 @@ def write_with_patience(messages, model):
     """Ask for a report; if the model is busy, wait and try again a few times."""
     for attempt in range(1, BUSY_ATTEMPTS + 1):
         try:
-            return llm.write_report(messages, model=model, **MODEL_SETTINGS.get(model, {}))
+            return llm.write_report(messages, model=model, response_format=RESPONSE_FORMAT,
+                                    **MODEL_SETTINGS.get(model, {}))
         except llm.ModelBusy:
             if attempt == BUSY_ATTEMPTS:
                 raise
@@ -62,17 +67,22 @@ def run_case(model, number):
     started = time.perf_counter()  # everything a visitor waits for: database, sections, model, check
     data = gather_report_data(scouted, coach=coach, surface=surface)
     sections = render_sections(data)
+    facts = build_facts(data)
     try:
-        reply = write_with_patience(build_messages(data, sections), model)
+        reply = write_with_patience(build_messages(data, facts), model)
     except Exception as error:  # testing script only: one failed case must not hide the other cases' results
         result["error"] = f"{type(error).__name__}: {error}"
         return result
-    report = assemble_report(sections, reply["text"])
+    model_sections, log = write_sections(data, facts, reply["text"])
+    report = assemble_report({**sections, **model_sections})
     check = check_report(report, data)
-    result.update(check, seconds=time.perf_counter() - started, reply=reply)
+    result.update(check, seconds=time.perf_counter() - started, reply=reply, log=log)
 
     (out_dir / f"{number}.md").write_text(report, encoding="utf-8")
-    (out_dir / f"{number}-model-reply.md").write_text(reply["text"], encoding="utf-8")
+    (out_dir / f"{number}-model-reply.json").write_text(reply["text"], encoding="utf-8")
+    (out_dir / f"{number}-facts.txt").write_text("\n".join(f"{f['id']}: {f['text']}" for f in facts),
+                                                 encoding="utf-8")
+    (out_dir / f"{number}-log.json").write_text(json.dumps(log, ensure_ascii=False, indent=1), encoding="utf-8")
     (out_dir / f"{number}-tool-answers.json").write_text(json.dumps(data, ensure_ascii=False, indent=1),
                                                          encoding="utf-8")
     return result
@@ -88,6 +98,8 @@ def print_result(result):
     print(f"  passed: {result['passed']}")
     print(f"  numbers not found: {result['numbers_not_found'] or 'none'}")
     print(f"  problems: {result['problems'] or 'none'}")
+    for entry in result["log"]:
+        print(f"  headline {entry['action']} ({entry['section']}): {entry['headline']!r}, because: {entry['reason']}")
     print(f"  {result['seconds']:.1f} s in total, {cost}, finish: {reply['finish_reason']}, "
           f"tokens in/out: {reply['input_tokens']}/{reply['output_tokens']} (of which thinking: "
           f"{reply['reasoning_tokens']})")
@@ -116,7 +128,10 @@ def main():
         done = [r for r in results if r["model"] == model and "error" not in r]
         costs = [r["reply"]["cost_usd"] for r in done if r["reply"]["cost_usd"] is not None]
         seconds = [r["seconds"] for r in done]
-        print(f"  {model}: {sum(r['passed'] for r in done)} of {len(numbers)} passed the automatic checks"
+        replaced = sum(1 for r in done for entry in r["log"] if entry["action"] == "replaced")
+        filled = sum(1 for r in done for entry in r["log"] if entry["action"] == "filled")
+        print(f"  {model}: {sum(r['passed'] for r in done)} of {len(numbers)} passed the automatic checks, "
+              f"{replaced} headline(s) replaced, {filled} filled by code"
               + (f", {sum(seconds) / len(seconds):.1f} s on average (slowest {max(seconds):.1f} s)" if seconds else "")
               + (f", ${sum(costs) / len(costs):.4f} per report on average" if costs else ""))
     print(f"\nReports saved in {CHECKS_DIR}/")
