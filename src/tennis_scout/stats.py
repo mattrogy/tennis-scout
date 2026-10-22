@@ -253,6 +253,7 @@ def head_to_head(player_a, player_b, surface=None, date_from=None, date_to=None,
             },
             "deciding_set_summary": {
                 "completed_matches": completed,
+                "matches_that_went_to_a_deciding_set": sum(deciding_sets.values()),
                 "deciding_sets_won": deciding_sets,
             },
             "note": "Walkovers are listed but not counted as wins. Dates are tournament start weeks. "
@@ -685,6 +686,8 @@ def recent_form(player, n=10, db_path=None):
                 "walkovers_listed_not_counted": len(matches) - len(played),
                 "retired_from": retired_from,
                 "retired_text": f"Retired in {retired_from} of the last {len(matches)} matches.",
+                "matches_that_went_to_a_deciding_set": sum(1 for m in matches if m["went_to_deciding_set"]),
+                "matches_with_a_tiebreak": sum(1 for m in matches if m["tiebreaks_won"] + m["tiebreaks_lost"] > 0),
             },
             "note": "'ret.' = the opponent retired; 'retired' = this player retired. Dates are tournament start weeks. "
                     "Scores are written from the winner's side: use the tiebreaks fields, not the score text.",
@@ -748,8 +751,9 @@ def matchup(player, opponent, surface=None, date_from=None, date_to=None, db_pat
             "opponent": o,
             f"when {p['name']} serves": _matchup_side(p, p_serve, o, o_return),
             f"when {o['name']} serves": _matchup_side(o, o_serve, p, p_return),
-            "note": "Each value comes with its match count, its tour percentile and its label, exactly as in "
-                    "serve_stats and return_stats. Nothing is subtracted or combined.",
+            "note": "Each value is that player's own number against all opponents (with these filters), with its "
+                    "match count, tour percentile and label, exactly as in serve_stats and return_stats. These are "
+                    "NOT results of matches between these two players. Nothing is subtracted or combined.",
         }
         return _result(db, content, p_serve["filters"])
 

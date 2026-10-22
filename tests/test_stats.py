@@ -94,6 +94,7 @@ def test_head_to_head_tiebreaks_are_decoded(fake_db):
                                           "tiebreaks_won": {"Alpha Ace": 2, "Bravo Base": 1}}
     # Both completed matches went to a 3rd set: Alpha won M1's, Bravo won M2's.
     assert result["deciding_set_summary"]["deciding_sets_won"] == {"Alpha Ace": 1, "Bravo Base": 1}
+    assert result["deciding_set_summary"]["matches_that_went_to_a_deciding_set"] == 2
     assert [m["went_to_deciding_set"] for m in result["matches"]] == [True, True, False, False]
 
 
@@ -252,6 +253,9 @@ def test_recent_form(fake_db):
     assert result["current_ranking"] == {"rank": 1, "points": 5000, "as_of": "9 June 2025"}
     clay_cup = result["matches"][2]  # M2, from Alpha's side: won 1 tie-break, lost 1, went to a 3rd set
     assert (clay_cup["tiebreaks_won"], clay_cup["tiebreaks_lost"], clay_cup["went_to_deciding_set"]) == (1, 1, True)
+    # Counted in code (M1 and M2 both had tie-breaks and a 3rd set), so a report never counts the list itself.
+    assert result["summary"]["matches_that_went_to_a_deciding_set"] == 2
+    assert result["summary"]["matches_with_a_tiebreak"] == 2
 
     bravo = stats.recent_form(BRAVO, n=2, db_path=fake_db)
     assert len(bravo["matches"]) == 2
@@ -334,6 +338,8 @@ def test_matchup(fake_db, small_thresholds):
     break_points = result["when Bravo Base serves"][2]
     assert break_points["about"] == "break points"
     assert break_points["returner"]["value"] == 45.5  # Alpha converted 5 of 11 (same as return_stats)
+    # Read as head-to-head results by models in testing: the note must say plainly that they are not.
+    assert "NOT results of matches between these two players" in result["note"]
 
 
 def test_default_report_period(fake_db):
