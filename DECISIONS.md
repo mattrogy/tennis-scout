@@ -14,7 +14,7 @@ Each entry records **the choice**, **the alternatives** and **why**.
 - **Choice:** one local SQLite file, `data/tennis.db`, built from the CSVs.
 - **Alternatives:** PostgreSQL; DuckDB; reading the CSVs with pandas on every question.
 - **Why:** about 65,000 matches fit easily in one file. SQLite needs no server and no account, and ships with Python.
-  The same file can be deployed with the website on Day 3. Postgres would add a server to run and pay for.
+  The same file can be deployed with the website. Postgres would add a server to run and pay for.
   DuckDB is great for analytics but is an extra dependency we don't need at this size. Re-reading CSVs on
   every question would be slow and would scatter the cleaning logic.
 
@@ -82,7 +82,7 @@ Each entry records **the choice**, **the alternatives** and **why**.
   They would distort percentages or cause a division by zero. Each answer counts them under "no usable stats".
 
 ## 9. One shared stats module
-- **Choice:** all stats logic lives in `src/tennis_scout/stats.py`. The MCP server (and the website on Day 3)
+- **Choice:** all stats logic lives in `src/tennis_scout/stats.py`. The MCP server (and the website)
   only call its functions.
 - **Alternatives:** separate logic in the MCP server and in the web backend.
 - **Why:** one place to test and fix. The Claude app and the website can never disagree on a number.
