@@ -10,10 +10,10 @@ import os
 from dotenv import load_dotenv
 from openai import APIStatusError, OpenAI, RateLimitError
 
-MODEL = "mistralai/mistral-large-4-0"  # Mistral Large 4 (Mistral Small 4 failed the pre-launch check)
+MODEL = "mistralai/mistral-medium-3-5"  # Mistral Medium 3.5: chosen after the model comparison (DECISIONS.md)
 MAX_TOKENS = 2000        # the model writes only short headlines and fact IDs (well under 1,000 tokens)
-# Mistral Large 4 can "think" before writing, and on OpenRouter those thinking tokens count against MAX_TOKENS.
-# With thinking on, it used all 3,000 tokens thinking and returned an empty report. "none" turns it off.
+# Some models "think" before writing, and on OpenRouter those thinking tokens count against MAX_TOKENS.
+# In testing, Mistral Large 4 used all its tokens thinking and returned an empty report. "none" turns it off.
 REASONING_EFFORT = "none"
 TIMEOUT_SECONDS = 50     # the website function stops after 60 seconds
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
