@@ -192,6 +192,59 @@ Each entry records **the choice**, **the alternatives** and **why**.
 - **Exceptions:** head-to-head keeps all meetings since 2015 (there are few, and old meetings are still useful context).
   Recent form stays "last 10 matches".
 
+## 18. Website reports: the code writes every fact, the model writes headlines only
+- **Choice:** sections 2–8 and 10 are written by code from the tool answers (`sections.py`). For "1. Summary" and
+  "9. Tactical takeaways", the code builds a numbered list of verified fact sentences (`facts.py`), including the label
+  counts and tactical angles (where one player's strength meets the other's weakness). The model returns JSON only:
+  short headlines **with no numbers**, each with the IDs of the facts that support it. The code checks every headline
+  (`headlines.py`) and writes it with its cited facts copied word for word. A headline that fails a check is replaced
+  by a plain code-written one, and the replacement is logged.
+- **Checks on each headline:** no digits; no sweeping words (every, all, none, always, never; "all surfaces" is
+  allowed); no stretching words (elite, best, top); no shot words (slice, deep, placement, rallies); no player names
+  except the two; the fact IDs must exist; and its **direction must match the labels it cites**: "target / attack /
+  go after" needs a weakness of the scouted player, "prepare for / beware / respect" a strength of the scouted player,
+  "use / lean on / rely on" a strength of the coach's player, praising words only strengths, negative words only weaknesses.
+- **Alternatives:** the model writes the whole report from the tool answers (as the MCP report does); the model writes
+  the Summary and Takeaways as free text; a report written entirely from code templates.
+- **Why:** rules in a prompt were not enough. Each round below used the same 6 test cases, and every report was read
+  by hand against its tool answers:
+
+  | Round | Design | Result |
+  |---|---|---|
+  | 1 | Model writes all 10 sections from the tool answers (Mistral Small 4) | 5 wrong facts in the 2 reports written (4 others refused: provider busy) |
+  | 2 | Same, plus new tool fields and rules (Mistral Large 4, Claude Haiku 5.5) | 4 and 7 wrong facts in 6 reports |
+  | 3 | Code writes sections 2–8 and 10, model writes sections 1 and 9 as free text (3 models) | 1 to 2 wrong facts per model |
+  | 4 | Model writes headlines with no numbers plus fact IDs (3 models) | **0 wrong facts**; 2 to 5 headlines (of 48) misread their facts in words |
+  | 5 | Plus the direction rules (Mistral Medium 3.5) | **0 wrong facts, 0 misreads** in the 45 headlines kept; 3 replaced |
+
+  Typical errors were counts made by the model ("four of the last ten went to a deciding set", where the list shows six),
+  sequences ("won their last two meetings", which was false), sweeping claims ("every stat is a strength", when three were
+  average), and praise on average stats ("performs well in tight moments").
+- **Known limit:** the checks read words, they do not understand them. They are strict on purpose, so some fair headlines
+  are replaced by plainer ones (for example "Prepare for frequent double faults" cites a weakness, and "prepare for" is kept
+  for strengths). The MCP report in Claude Code is unchanged: there the model still writes all 10 sections.
+
+## 19. Website writer model: Mistral Medium 3.5
+- **Choice:** `mistralai/mistral-medium-3-5` through OpenRouter, thinking turned off, one call per report, at most
+  2,000 output tokens. The model name lives only in `llm.py`; visitors cannot choose it.
+- **Alternatives tested on the same 6 cases:** Mistral Small 4, Mistral Large 4, Claude Haiku 5.5, Claude Sonnet 5.5.
+  Final design (round 4 above, then round 5 for the chosen model), with the real cost reported by OpenRouter:
+
+  | Model | Headlines that misread their facts (of 48) | Replaced by code | Time per report (average) | Cost per report |
+  |---|---|---|---|---|
+  | Mistral Large 4 | 5 | 9 | 8.4 s | $0.0040 |
+  | **Mistral Medium 3.5** | 2 | 1 | 3.8 s | $0.0050 |
+  | Claude Sonnet 5.5 | 2 | 1 | 6.5 s | $0.0099 |
+  | Mistral Medium 3.5, with direction rules | **0** | 3 | 9.2 s (slowest 10.6 s) | $0.0052 |
+
+- **Why:** the fewest misreads (tied with Sonnet) at half Sonnet's price, fast enough for a "report in 30 seconds"
+  page, and a European provider. Sonnet wrote the most useful headlines, so it stays the quality reference.
+- **What testing taught:** Mistral Small 4 was often refused ("temporarily rate-limited upstream", 4 of 6 reports never
+  written). Mistral Large 4 spent its whole token budget "thinking" and returned empty reports until thinking was turned off.
+  Claude Sonnet 5.5 cannot turn thinking off, and refuses temperature 0 while thinking.
+- **Speed:** the website function may run 60 seconds and the model call times out at 50; the slowest report took
+  10.6 seconds. No streaming: the checks need the whole report before it is shown or cached.
+
 ## 11. Ideas for V2 (not now)
 - **Coach-focused scouting:** tour averages for the same surface and period next to every stat; a coded strength/weakness
   rule (clearly above or below average **and** at least N matches, otherwise "not enough data"); a matchup view "for my player"
