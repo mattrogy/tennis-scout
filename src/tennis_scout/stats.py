@@ -240,7 +240,11 @@ def head_to_head(player_a, player_b, surface=None, date_from=None, date_to=None,
             "player_b": b,
             "wins": {a["name"]: wins[a["player_key"]], b["name"]: wins[b["player_key"]]},
             "matches_used": sum(wins.values()),
+            "small_sample": sum(wins.values()) < MIN_MATCHES,
             "matches_listed": len(matches),
+            # Copied from the last match in the list, so "who won the last meeting" never has to be worked out.
+            "most_recent_meeting": {key: matches[-1][key] for key in ("date", "tournament", "round", "winner",
+                                                                      "finish")} if matches else None,
             "tiebreak_summary": {
                 "completed_matches": completed,
                 "matches_with_a_tiebreak": matches_with_tiebreak,
@@ -255,13 +259,15 @@ def head_to_head(player_a, player_b, surface=None, date_from=None, date_to=None,
                     "Scores are written from the winner's side: use the tiebreaks_won fields, not the score text.",
             "matches": matches,
         }
+        if not matches:
+            content["message"] = f"No meetings between {a['name']} and {b['name']} since 2015 with these filters."
         return _result(db, content, filters)
 
 
 # ---------------------------------------------------------------- comparison with the tour
 
 # A stat gets a label only if it is based on at least this many matches (tie-breaks / deciding sets for pressure).
-MIN_MATCHES = 10
+MIN_MATCHES = 10  # also the "small_sample" threshold: under 10 matches, every answer says small_sample = true
 # A percentile is given only if at least this many other players can be compared.
 MIN_PEERS = 30
 STRENGTH_PERCENTILE = 75
@@ -429,6 +435,7 @@ def serve_stats(player, surface=None, date_from=None, date_to=None, db_path=None
                          [p["player_key"]] + filter_values).fetchone()
 
         content = {"player": p, **_point_counts(row)}
+        content["small_sample"] = content["matches_used"] < MIN_MATCHES
         if content["matches_used"] == 0:
             content["serve"] = None
             content["message"] = "No completed match with usable serve stats for these filters."
@@ -512,6 +519,7 @@ def return_stats(player, surface=None, date_from=None, date_to=None, db_path=Non
                          [p["player_key"]] + filter_values).fetchone()
 
         content = {"player": p, **_point_counts(row)}
+        content["small_sample"] = content["matches_used"] < MIN_MATCHES
         if content["matches_used"] == 0:
             content["return"] = None
             content["message"] = "No completed match with usable stats for these filters."
@@ -585,6 +593,7 @@ def pressure_stats(player, surface=None, date_from=None, date_to=None, db_path=N
             "player": p,
             "matches_found": row["found"],
             "matches_used": row["used"] or 0,
+            "small_sample": (row["used"] or 0) < MIN_MATCHES,
             "matches_skipped": {
                 "walkover": row["walkovers"] or 0,
                 "retired_or_ended_early": row["ended_early"] or 0,
@@ -705,6 +714,7 @@ def _matchup_side(server, server_serve, returner, returner_return):
                 "stat": serve_stat,
                 "value": (server_serve["serve"] or {}).get(serve_stat),
                 "matches_used": server_serve["matches_used"],
+                "small_sample": server_serve["small_sample"],
                 **server_serve.get("compared_to_tour", {}).get(serve_stat, {}),
             },
             "returner": {
@@ -712,6 +722,7 @@ def _matchup_side(server, server_serve, returner, returner_return):
                 "stat": return_stat,
                 "value": (returner_return["return"] or {}).get(return_stat),
                 "matches_used": returner_return["matches_used"],
+                "small_sample": returner_return["small_sample"],
                 **returner_return.get("compared_to_tour", {}).get(return_stat, {}),
             },
         })

@@ -97,6 +97,33 @@ def test_head_to_head_tiebreaks_are_decoded(fake_db):
     assert [m["went_to_deciding_set"] for m in result["matches"]] == [True, True, False, False]
 
 
+
+def test_head_to_head_most_recent_meeting_and_no_meetings(fake_db):
+    result = stats.head_to_head(ALPHA, BRAVO, db_path=fake_db)
+    # Copied from the last match listed (here the walkover), so nobody has to work out who won last.
+    assert result["most_recent_meeting"] == {"date": "week of 7 July 2025", "tournament": "Summer Open",
+                                             "round": "QF", "winner": "Alpha Ace", "finish": "walkover"}
+    assert "message" not in result
+
+    never = stats.head_to_head(ALPHA, CHARLIE, db_path=fake_db)  # same tour, never played each other
+    assert never["matches_listed"] == 0
+    assert never["most_recent_meeting"] is None
+    assert never["message"] == "No meetings between Alpha Ace and Charlie Clay since 2015 with these filters."
+
+
+def test_small_sample_flags(fake_db, monkeypatch):
+    # Fake players have 2 or 3 matches: below the 10-match threshold, every answer says so.
+    assert stats.serve_stats(ALPHA, db_path=fake_db)["small_sample"] is True
+    assert stats.return_stats(ALPHA, db_path=fake_db)["small_sample"] is True
+    assert stats.pressure_stats(ALPHA, db_path=fake_db)["small_sample"] is True
+    assert stats.head_to_head(ALPHA, BRAVO, db_path=fake_db)["small_sample"] is True
+    side = stats.matchup(ALPHA, BRAVO, db_path=fake_db)["when Alpha Ace serves"][0]
+    assert side["server"]["small_sample"] is True and side["returner"]["small_sample"] is True
+
+    monkeypatch.setattr(stats, "MIN_MATCHES", 2)  # 2 matches used is no longer a small sample
+    assert stats.serve_stats(ALPHA, db_path=fake_db)["small_sample"] is False
+    assert stats.pressure_stats(ALPHA, db_path=fake_db)["small_sample"] is False
+
 def test_find_player(fake_db):
     found = stats.find_player("alpha", db_path=fake_db)["candidates"]
     assert [p["player_key"] for p in found] == [ALPHA]
