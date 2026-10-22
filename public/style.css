@@ -1,0 +1,166 @@
+/* Tennis Scout: one simple page, readable on a phone. Colours are set once here and switch for dark mode. */
+:root {
+  --bg: #f7f5f1;
+  --card: #ffffff;
+  --text: #1f2328;
+  --muted: #5f6670;
+  --line: #e2ddd5;
+  --accent: #b5532d;        /* clay */
+  --accent-text: #ffffff;
+  --ok-bg: #e8f4ea;
+  --ok-text: #1f5f2c;
+  --warn-bg: #fff3d6;
+  --warn-text: #6b4a00;
+  --error-text: #a3261b;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a;
+    --card: #1e2125;
+    --text: #e8e6e3;
+    --muted: #a3a8ae;
+    --line: #33373d;
+    --accent: #e07a50;
+    --accent-text: #15171a;
+    --ok-bg: #1d3323;
+    --ok-text: #a6dcb1;
+    --warn-bg: #3a2f12;
+    --warn-text: #f2d48a;
+    --error-text: #ff8a7a;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+header, main, footer { max-width: 860px; margin: 0 auto; padding: 0 16px; }
+header { padding-top: 32px; }
+h1 { margin: 0 0 8px; font-size: 1.9rem; }
+header p { margin: 0 0 24px; color: var(--muted); }
+a { color: var(--accent); }
+
+form {
+  display: grid;
+  grid-template-columns: 1fr 1fr 180px auto;
+  gap: 12px;
+  align-items: end;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+}
+.field { position: relative; display: flex; flex-direction: column; gap: 4px; }
+label { font-weight: 600; font-size: 0.9rem; }
+.optional { font-weight: 400; color: var(--muted); }
+input, select, button { font: inherit; }
+input, select {
+  width: 100%;
+  min-height: 46px;          /* the same height for the name boxes and the surface box */
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+input.picked { border-color: var(--accent); }
+select {
+  appearance: none;          /* Safari draws its own smaller box otherwise */
+  -webkit-appearance: none;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23888' stroke-width='2'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+}
+button {
+  padding: 10px 22px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.6; cursor: wait; }
+.form-message { grid-column: 1 / -1; margin: 0; min-height: 1.5em; color: var(--error-text); }
+.form-message.busy { color: var(--muted); }
+
+.suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  margin: 4px 0 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+.suggestions button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  font-weight: 400;
+  border-radius: 6px;
+}
+.suggestions button:hover, .suggestions button:focus { background: var(--bg); }
+.suggestions .detail { color: var(--muted); font-size: 0.85rem; }
+
+#result { margin-top: 24px; }
+.badge, .banner { padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; }
+.badge { display: inline-block; background: var(--ok-bg); color: var(--ok-text); font-weight: 600; }
+.banner { background: var(--warn-bg); color: var(--warn-text); }
+.banner ul { margin: 6px 0 0; padding-left: 20px; }
+
+.report {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 20px 20px;
+  overflow-x: auto;   /* wide tables scroll inside the card on a phone, the page itself does not */
+}
+.report h2 { font-size: 1.2rem; margin: 28px 0 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.report h2:first-child { border-top: 0; }
+.report table { border-collapse: collapse; width: 100%; font-size: 0.92rem; margin: 8px 0 12px; }
+.report th, .report td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.report th { white-space: nowrap; }
+.report li { margin: 4px 0; }
+.report .nowrap { white-space: nowrap; }   /* a score or a date never splits across two lines */
+.report details {
+  margin: 8px 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 12px;
+}
+.report summary { cursor: pointer; color: var(--accent); font-weight: 600; padding: 6px 0; }
+.report li li { color: var(--muted); font-size: 0.95rem; }
+.made-by { color: var(--muted); font-size: 0.85rem; }
+
+.spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 8px;
+  vertical-align: -2px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+footer { margin-top: 40px; padding-bottom: 40px; color: var(--muted); font-size: 0.85rem; }
+
+@media (max-width: 720px) {
+  form { grid-template-columns: 1fr; }
+  button[type="submit"] { width: 100%; }
+}

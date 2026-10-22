@@ -126,3 +126,10 @@ def test_a_broken_model_reply_still_gives_a_full_report(client, monkeypatch):
     assert answer.status_code == 200
     assert answer.json()["check"]["passed"]  # plain code headlines, every fact verified
     assert "## 9. Tactical takeaways for the coach" in answer.json()["report"]
+
+
+def test_the_page_is_served_locally(client):
+    page = client.get("/")
+    assert page.status_code == 200 and "Tennis Scout" in page.text
+    assert "CC BY-NC-SA 4.0" in page.text  # the data credit is always visible
+    assert client.get("/app.js").status_code == 200 and client.get("/style.css").status_code == 200

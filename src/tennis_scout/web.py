@@ -9,15 +9,18 @@ Visitors only send player keys and a surface picked from lists, so no visitor te
 Run it locally with:  uv run fastapi dev src/tennis_scout/web.py
 """
 
+import os
 import re
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from tennis_scout import llm, stats
 from tennis_scout.facts import build_facts
 from tennis_scout.headlines import RESPONSE_FORMAT, build_messages, write_sections
 from tennis_scout.report import assemble_report, check_report, gather_report_data
+from tennis_scout.db import PROJECT_ROOT
 from tennis_scout.sections import render_sections
 
 app = FastAPI(title="tennis-scout", docs_url=None, redoc_url=None)  # no public API docs page
@@ -101,3 +104,9 @@ def report(scouted: str = "", coach: str = "", surface: str = ""):
         "headlines_replaced": sum(1 for entry in replaced if entry["action"] == "replaced"),
         "model": llm.MODEL,
     }, cache=check["passed"])  # a report that fails the check is still shown (with a warning), never cached
+
+
+# On your laptop, also serve the page (public/) at "/". On Vercel the CDN serves public/ itself, before this app,
+# and Vercel's docs say not to mount that folder there. Mounted last, so the /api/ routes above always win.
+if not os.environ.get("VERCEL"):
+    app.mount("/", StaticFiles(directory=PROJECT_ROOT / "public", html=True), name="page")
