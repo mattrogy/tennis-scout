@@ -22,5 +22,9 @@ def test_vercel_settings():
     assert "data/raw/**" in function["excludeFiles"]  # the raw CSVs stay out of the function
     assert "tennis.db" not in function["excludeFiles"]  # the database must stay in
 
+    # Open to anyone with the link, but not listed by search engines: every answer says noindex.
+    assert settings["headers"][0]["source"] == "/(.*)"
+    assert {"key": "X-Robots-Tag", "value": "noindex, nofollow"} in settings["headers"][0]["headers"]
+
     build = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())["tool"]["vercel"]["scripts"]["build"]
     assert "download_data.py" in build and "build_db.py" in build  # the database is built during each deploy

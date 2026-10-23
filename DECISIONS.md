@@ -256,6 +256,9 @@ Each entry records **the choice**, **the alternatives** and **why**.
   If the mirror disappeared, new deploys would fail but the live site would keep working. Hobby is for non-commercial
   use, which matches the data licence.
 - **Checked on the real platform:** `/api/health` on a preview read the bundled database (data through 2026-05-25).
+- **Open, but not listed:** anyone with the link can use the site, but a `noindex` tag in the page and an
+  `X-Robots-Tag: noindex` header on every answer ask search engines not to list it. There is deliberately no
+  `robots.txt` block: it would stop search engines from reading the page, and so from seeing the noindex instruction.
 
 ## 21. Spending limits for a public site
 - **Choice:** three independent limits. (1) A dedicated OpenRouter key with a **$5 credit limit**, stored only in

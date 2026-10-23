@@ -133,6 +133,7 @@ def test_the_page_is_served_locally(client):
     page = client.get("/")
     assert page.status_code == 200 and "Tennis Scout" in page.text
     assert "CC BY-NC-SA 4.0" in page.text  # the data credit is always visible
+    assert '<meta name="robots" content="noindex, nofollow">' in page.text  # not listed by search engines
     assert client.get("/app.js").status_code == 200 and client.get("/style.css").status_code == 200
 
 

@@ -204,6 +204,7 @@ entries 18 and 19.
 - **Spending has three independent limits:** a dedicated OpenRouter key with a **$5 credit limit** (the hard ceiling,
   stored only in Vercel's settings); a firewall rule allowing **10 requests per 10 minutes per IP**; and a one-day
   cache, so the same report asked twice costs nothing. Bad requests are refused before any model call.
+- **Not listed by search engines:** the site is open to anyone with the link, but every answer says `noindex`.
 - **The page is locked down:** the report is cleaned by DOMPurify before display, and a Content-Security-Policy lets
   the page run only its own script and two pinned libraries with integrity hashes.
 
