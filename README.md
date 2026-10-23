@@ -1,10 +1,15 @@
 # tennis-scout
 
-**A scouting assistant for tennis coaches, built on my own MCP server.**
-Ask Claude *"scout Alcaraz on clay, my player is Sinner"* and get a structured report: serve, return, pressure,
-strengths and weaknesses against the tour, head-to-head, the serve-vs-return matchup, recent form and tactical takeaways.
-Every number comes from a database through tested tools, with the number of matches behind it.
-The AI writes the report; it never invents or computes a statistic.
+**A scouting assistant for tennis coaches: a public website and my own MCP server, on one tested stats module.**
+
+**Try it online: [tennis-scout-roan.vercel.app](https://tennis-scout-roan.vercel.app)** — pick the player you will face (and optionally your own player and a
+surface), or simply type *"Alcaraz vs Sinner on clay, I coach Sinner"*, and get a 10-section scouting report in a few
+seconds: serve, return, pressure, strengths and weaknesses against the tour, head-to-head, the serve-vs-return matchup,
+recent form and tactical takeaways.
+
+In Claude (Claude Code, Claude Desktop), the same report comes from the MCP server: ask *"scout Alcaraz on clay, my
+player is Sinner"*. Every number comes from a database through tested tools, with the number of matches behind it.
+**On the website, the AI cannot write a number or a fact at all**: code writes them, the AI only writes checked headlines.
 
 **Data through May 2026** (ATP and WTA tour-level matches since 2015). Rankings as of 8 June 2026.
 
@@ -151,16 +156,56 @@ These are suggestions, not certainties.
                                         │
                      ┌──────────────────┴──────────────────┐
                      ▼                                     ▼
-          src/tennis_scout/mcp_server.py           website backend (planned)
-          7 tools + scout_report prompt            same functions as tools
-                     │
-                     ▼
-          Claude (Claude Code / Claude Desktop)
-          writes the report, citing the numbers
+          src/tennis_scout/mcp_server.py           src/tennis_scout/web.py (FastAPI on Vercel)
+          7 tools + scout_report prompt            sections.py: sections 2-8 and 10, written by code
+                     │                             facts.py:    numbered verified facts
+                     ▼                             headlines.py: AI headlines, checked by code
+          Claude (Claude Code / Claude Desktop)              │
+          writes the report, citing the numbers              ▼
+                                                   public/: the page (form + plain-English box)
 ```
 
-The MCP server is a thin layer: each tool is a few lines that call `stats.py`. Because the website will call the
-same functions, the Claude app and the website can never disagree on a number.
+The MCP server and the website are thin layers over `stats.py`, so they can never disagree on a number.
+
+## The website
+
+**What a visitor does:** type a few letters of a name and pick the player from the list (the page sends player keys,
+never free text, to the report), or describe the match in one sentence (English or French); the form is filled in for
+them to check, and nothing runs until they click **Scout**.
+
+**How a report is built** (one request, about 3 to 6 seconds):
+
+1. The same tested functions as the MCP server gather every number (`report.py`).
+2. **Code writes sections 2 to 8 and 10** straight from those numbers: tables, head-to-head, matchup, recent form,
+   caveats (`sections.py`).
+3. Code turns the numbers into a **numbered list of verified fact sentences**, with label counts and tactical angles
+   (where one player's strength meets the other's weakness) (`facts.py`).
+4. **One call to Mistral Medium 3.5** returns JSON only: short headlines **with no numbers**, each citing fact IDs.
+5. **Code checks every headline** (`headlines.py`): no digits, no sweeping words (every, never...), no stretched
+   percentiles (elite, best...), no shot advice, no other player's name, the cited facts must exist, and its
+   **direction must match the labels it cites** ("target" needs a weakness of the scouted player, "rely on" a strength
+   of your player...). A failing headline is replaced by a plain code-written one, and logged.
+6. Each headline is shown with its cited facts **copied word for word**, and a final check confirms that every number
+   in the report exists in the statistics ("Numbers check: OK" on the page).
+
+**Why this design:** five rounds of testing on the same 6 cases, every report read by hand. When the model wrote
+the report itself, wrong facts came back every time (counts it made, sequences like "won their last two meetings",
+"every stat is a strength"), even with strict rules. Once the model could only write headlines over code-written
+facts, **wrong facts went to zero**, and the direction rules brought misread headlines to zero too.
+Five models were compared (Mistral Small 4, Large 4, Medium 3.5, Claude Haiku 5.5 and Sonnet 5.5); Mistral Medium 3.5
+had the fewest misreads at half Sonnet's price, about **$0.005 per report**. Full story: [DECISIONS.md](DECISIONS.md),
+entries 18 and 19.
+
+**Safety and cost, for a public site run by one person:**
+
+- **The visitor's text never reaches the report.** The plain-English box sends its text in a POST body (never in a
+  URL, log or cache) to a separate, small call that only extracts names and a surface; code validates them against
+  the database, the model's reply is never shown, and off-topic or injected text gets one polite message.
+- **Spending has three independent limits:** a dedicated OpenRouter key with a **$5 credit limit** (the hard ceiling,
+  stored only in Vercel's settings); a firewall rule allowing **10 requests per 10 minutes per IP**; and a one-day
+  cache, so the same report asked twice costs nothing. Bad requests are refused before any model call.
+- **The page is locked down:** the report is cleaned by DOMPurify before display, and a Content-Security-Policy lets
+  the page run only its own script and two pinned libraries with integrity hashes.
 
 ## The tools and their formulas
 
@@ -241,6 +286,9 @@ The full reasoning (choice, alternatives, why) is in [DECISIONS.md](DECISIONS.md
 - **The report is a prompt, the numbers are code:** the model writes, the tools count.
 - **Percentiles, not gut feeling:** strengths and weaknesses come from a coded rule, with minimum sample sizes
   (10 matches, 30 peers).
+- **On the website, code writes every fact:** the AI writes checked headlines only (see [The website](#the-website)).
+- **The database is built during each deploy** from the pinned mirror, so neither the raw data nor `tennis.db` is ever
+  in the repository.
 
 ### What testing the AI taught me
 
@@ -268,8 +316,11 @@ Details in [DECISIONS.md](DECISIONS.md) (entry 15).
   not only the top 50, so top players naturally rank high on most stats.
 - **Some matches have no serve stats** (old Davis Cup, Roland Garros 2026, about 6% overall). They still count in records,
   head-to-heads and pressure stats.
-- **The AI follows rules, not guarantees:** the prompt forbids invented or computed numbers, and the tests check the tools,
-  but a report should still be read with its cited numbers.
+- **In Claude (MCP), the AI follows rules, not guarantees:** the prompt forbids invented or computed numbers, and the
+  tests check the tools, but a report should still be read with its cited numbers. On the website, facts are written by
+  code, and the AI's headlines are checked by word rules: strict, so some fair headlines are replaced by plainer ones.
+- **Names must be spelt correctly** in the plain-English box ("djokovich" is politely refused); the name search
+  matches parts of names, not near-spellings.
 
 ## How to run it
 
@@ -281,8 +332,13 @@ cd tennis-scout
 uv sync                                    # install dependencies
 uv run python scripts/download_data.py     # download the CSV files (about 25 MB)
 uv run python scripts/build_db.py          # build data/tennis.db
-uv run pytest                              # 55 tests
+uv run pytest                              # 150 tests (the page's JavaScript tests run too if Node is installed)
 ```
+
+**The website, on your own computer:** put your OpenRouter key in a `.env` file (`OPENROUTER_API_KEY=...`, never
+committed), then run `uv run fastapi dev src/tennis_scout/web.py` and open http://127.0.0.1:8000.
+`uv run python scripts/check_reports.py` writes the 6 test reports with the website's model and checks them
+(`--parse` checks the plain-English box on 9 phrasings).
 
 **Claude Code:** the repository includes `.mcp.json`. Start `claude` in the project folder and approve the
 `tennis-scout` server. Then ask a question, or run `/mcp__tennis-scout__scout_report`.
@@ -318,6 +374,16 @@ scripts/build_db.py           clean + load into SQLite
 src/tennis_scout/db.py        database path, read-only connection, name normalisation
 src/tennis_scout/stats.py     all stats functions
 src/tennis_scout/mcp_server.py  MCP tools + scout_report prompt
+src/tennis_scout/report.py    report rules, the tool calls a report needs, check_report
+src/tennis_scout/sections.py  website: sections 2-8 and 10, written by code
+src/tennis_scout/facts.py     website: numbered verified facts, label counts, tactical angles
+src/tennis_scout/headlines.py website: the headline prompt, checks and replacements
+src/tennis_scout/parse.py     website: the plain-English box (extraction + validation)
+src/tennis_scout/llm.py       the one place that calls a model (OpenRouter), model name set once
+src/tennis_scout/web.py       website API: /api/health, /api/players, /api/report, /api/parse
+public/                       the page: index.html, style.css, app.js, answers.js
+app.py, vercel.json           Vercel entrypoint and function settings
+scripts/check_reports.py      writes and checks real reports and phrasings (testing only)
 tests/                        hand-calculated checks on a tiny fake dataset + known real results
 DECISIONS.md                  every key choice, with alternatives and reasons
 ```

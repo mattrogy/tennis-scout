@@ -245,6 +245,61 @@ Each entry records **the choice**, **the alternatives** and **why**.
 - **Speed:** the website function may run 60 seconds and the model call times out at 50; the slowest report took
   10.6 seconds. No streaming: the checks need the whole report before it is shown or cached.
 
+## 20. Website hosting: Vercel Hobby, database built during each deploy
+- **Choice:** the website runs as one Python function on Vercel's free Hobby plan (FastAPI, entrypoint `app.py`,
+  60-second limit). During each deploy, the build downloads the pinned data and builds `data/tennis.db`
+  (`[tool.vercel.scripts]` in `pyproject.toml`); the database is bundled into the function, never into the repository.
+- **Alternatives:** ship the local database with a command-line deploy; download it from external storage when the
+  function starts; commit it to the repository.
+- **Why:** the repository stays clean and reproducible (the same pinned mirror commit gives the same database as on my
+  laptop and in the tests), deploys are automatic from GitHub, and the 26 MB file is far below the 500 MB function limit.
+  If the mirror disappeared, new deploys would fail but the live site would keep working. Hobby is for non-commercial
+  use, which matches the data licence.
+- **Checked on the real platform:** `/api/health` on a preview read the bundled database (data through 2026-05-25).
+
+## 21. Spending limits for a public site
+- **Choice:** three independent limits. (1) A dedicated OpenRouter key with a **$5 credit limit**, stored only in
+  Vercel's environment variables: the hard ceiling. (2) One Vercel firewall rule (Hobby allows one) covering
+  `/api/report` **or** `/api/parse`: **10 requests per 600 seconds per IP**, answered with 429. (3) Reports that pass
+  the check are cached by the CDN for a day, so the same report asked twice costs nothing. Each report makes one model
+  call (at most 2,000 output tokens, 50-second timeout); bad requests are refused before any call.
+- **Alternatives:** a per-visitor counter in the function (each instance has its own memory, so it cannot count across
+  visitors); a database to count reports per day (one more service to run); no limit but the key's.
+- **Why:** the key limit guarantees the bill; the firewall stops one visitor from draining it in minutes; the cache keeps
+  popular reports free. A report costs about $0.005, so $5 is about 1,000 reports.
+- **Limit raised from 5 to 10** when the plain-English box arrived: both paths share one counter, and using the box
+  takes two requests (fill the form, then scout).
+- **Tested on the preview:** the 6th quick report (at the limit of 5) was refused; the page now shows "Too many
+  reports in a short time. Please wait 10 minutes" (the firewall answers in plain text, so the page reads the status
+  before parsing JSON). **Not tested live:** the "budget used up" message (covered by a test with a fake model).
+
+## 22. Interface: a form with name search, plus an optional plain-English box
+- **Choice:** the visitor picks players from a search list (the page sends player keys, never free text, to the
+  report), or types one sentence. That sentence goes to a separate small call that **only extracts** the scouted
+  player, the coach's player and the surface as structured output. The code validates them (`find_player`, two
+  different players, same tour, allowed surface), fills the form, and the visitor confirms with **Scout**.
+- **Alternatives:** a free chat box; the form only.
+- **Why:** a chat box would send every visitor message to the model, making off-topic use, prompt injection and cost
+  hard to control. The form keeps the report free of visitor text. The box adds convenience without that risk: its text
+  travels in a POST body (never in a URL, log or cache), the model's reply is never shown, and anything that does not
+  fit gets one polite message. On 9 real phrasings (English, French, a misspelt name, two injection attempts,
+  off-topic questions), all 9 behaved as expected.
+
+## 23. Showing and caching a report
+- **Choice:** a report that passes `check_report` is shown with a "Numbers check: OK" badge and cached for a day. A
+  report that fails is **still shown**, with a warning banner listing what failed, and is **never cached**. Errors
+  (budget used up, model busy, model failure, bad input) are never cached either. No automatic retry.
+- **Alternatives:** hide a failed report; regenerate it automatically.
+- **Why:** hiding would waste a paid call and give the visitor nothing; regenerating would double the cost of a bad
+  request. With code writing every fact (entry 18), the check is a last safety net rather than a frequent event.
+
+## 24. Page security
+- **Choice:** the report's Markdown is turned into HTML by `marked` and cleaned by `DOMPurify` (both pinned on cdnjs
+  with integrity hashes); a Content-Security-Policy allows only the page's own scripts and those two files; names in
+  lists are inserted as text, never as HTML.
+- **Why:** the report contains names and model-written headlines; even though the headlines are checked, nothing in
+  them must ever be able to run in a visitor's browser.
+
 ## 11. Ideas for V2 (not now)
 - **Coach-focused scouting:** tour averages for the same surface and period next to every stat; a coded strength/weakness
   rule (clearly above or below average **and** at least N matches, otherwise "not enough data"); a matchup view "for my player"
@@ -254,3 +309,8 @@ Each entry records **the choice**, **the alternatives** and **why**.
 - **Exact match dates:** Sackmann only gives tournament start dates, so answers say "week of ...".
   Exact days would need a second source (e.g. tennis-data.co.uk) and name matching across sources.
   Guessing the day from the round was rejected: it would be invented data. Order is still correct (round order).
+- **Website: tolerate small misspellings in names** ("djokovich"): today the search matches parts of names only, so the
+  plain-English box politely refuses a misspelt name.
+- **Website: smarter direction rules.** "Be ready for Gauff to attack your serve" is replaced because "attack" is read
+  as the coach's target; the rules could check who the subject of the verb is.
+- **Website: test the "budget used up" message live** (lower the key's limit to its usage on a preview, then restore it).
