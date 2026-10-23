@@ -30,16 +30,21 @@ function setUpSearch(boxName) {
 }
 
 async function search(text, list, input, boxName) {
-  const answer = await fetch(`/api/players?q=${encodeURIComponent(text)}`);
-  const body = await answer.json();
+  let result;
+  try {
+    result = await readAnswer(await fetch(`/api/players?q=${encodeURIComponent(text)}`));
+  } catch (networkFailure) {
+    result = { ok: false, error: NETWORK_MESSAGE }; // only a real network failure lands here
+  }
+  const candidates = result.ok ? result.body.candidates : [];
   list.replaceChildren(); // build the list with textContent only, so names can never become HTML
-  if (!answer.ok || body.candidates.length === 0) {
+  if (candidates.length === 0) {
     const empty = document.createElement("li");
     empty.className = "detail";
-    empty.textContent = answer.ok ? "No tour-level player found since 2015." : body.error;
+    empty.textContent = result.ok ? "No tour-level player found since 2015." : result.error;
     list.append(empty);
   }
-  for (const player of body.candidates || []) {
+  for (const player of candidates) {
     const item = document.createElement("li");
     const choose = document.createElement("button");
     choose.type = "button";
@@ -113,13 +118,18 @@ async function scout(event) {
   message.classList.add("busy");
 
   try {
-    const answer = await fetch(`/api/report?${params}`);
-    const body = await answer.json();
+    let result;
+    try {
+      result = await readAnswer(await fetch(`/api/report?${params}`));
+    } catch (networkFailure) {
+      result = { ok: false, error: NETWORK_MESSAGE }; // only a real network failure lands here
+    }
     message.classList.remove("busy");
-    if (!answer.ok) {
-      message.textContent = body.error || "Something went wrong. Please try again.";
+    if (!result.ok) {
+      message.textContent = result.error; // 429 from the firewall, 504, our API's own messages...
       return;
     }
+    const body = result.body;
     message.textContent = "";
     showCheck(body.check);
     // The report is Markdown: turned into HTML by marked, then cleaned by DOMPurify, so nothing in it can run.
@@ -127,9 +137,6 @@ async function scout(event) {
     el("made-by").textContent = `Headlines in sections 1 and 9 written by ${body.model}, checked by code.`;
     el("result").hidden = false;
     el("result").scrollIntoView({ behavior: "smooth", block: "start" });
-  } catch (error) {
-    message.classList.remove("busy");
-    message.textContent = "The site could not be reached. Please try again.";
   } finally {
     button.disabled = false;
   }
