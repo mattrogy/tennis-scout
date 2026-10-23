@@ -4,8 +4,11 @@
     GET /api/players?q=alca                           name search (no AI): candidates with their player_key
     GET /api/report?scouted=atp-207989&coach=atp-206173&surface=Clay
                                                       one scouting report (one model call, at most)
+    POST /api/parse   {"text": "Alcaraz vs Sinner on clay, I coach Sinner"}
+                                                      fills the form from plain English (one small model call)
 
-Visitors only send player keys and a surface picked from lists, so no visitor text ever reaches the model.
+The report never sees visitor text: it only gets player keys and a surface picked from lists. The plain-English
+text goes to /api/parse only, in the request body (never in a URL, a log or a cache), and only to extract fields.
 Run it locally with:  uv run fastapi dev src/tennis_scout/web.py
 """
 
@@ -15,10 +18,13 @@ import re
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from tennis_scout import llm, stats
 from tennis_scout.facts import build_facts
 from tennis_scout.headlines import RESPONSE_FORMAT, build_messages, write_sections
+from tennis_scout.parse import (MAX_TEXT_LENGTH, PARSE_FORMAT, POLITE_MESSAGE, NotAMatchRequest,
+                                build_parse_messages, fields_from_reply)
 from tennis_scout.report import assemble_report, check_report, gather_report_data
 from tennis_scout.db import PROJECT_ROOT
 from tennis_scout.sections import render_sections
@@ -105,6 +111,33 @@ def report(scouted: str = "", coach: str = "", surface: str = ""):
         "headlines_replaced": sum(1 for entry in replaced if entry["action"] == "replaced"),
         "model": llm.MODEL,
     }, cache=check["passed"])  # a report that fails the check is still shown (with a warning), never cached
+
+
+class ParseRequest(BaseModel):
+    text: str = ""
+
+
+@app.post("/api/parse")
+def parse(request: ParseRequest | None = None):  # no body at all is treated as empty text
+    text = (request.text if request else "").strip()
+    if not text or len(text) > MAX_TEXT_LENGTH:
+        return _error(f"Type 1 to {MAX_TEXT_LENGTH} characters.", 400)
+    try:
+        reply = write_report(build_parse_messages(text), response_format=PARSE_FORMAT, max_tokens=200)
+    except llm.BudgetUsedUp:
+        return _error("The report budget for this site is used up. Please try again later.", 503)
+    except llm.ModelBusy:
+        return _error("The model is busy right now. Please try again in a minute.", 503)
+    except Exception as error:
+        print(f"parse call failed: {type(error).__name__}")
+        return _error("The request could not be read this time. Please use the form below.", 502)
+    try:
+        fields = fields_from_reply(reply["text"], db_path=DB_PATH)
+    except NotAMatchRequest as why:
+        print(f"parse rejected: {why}")  # the reason only, never the visitor's text or the model's reply
+        return _error(POLITE_MESSAGE, 422)
+    print("parse accepted")
+    return _answer(fields)  # never cached: it depends on the visitor's own text
 
 
 # On your laptop, also serve the page (public/) at "/". On Vercel the CDN serves public/ itself, before this app,
