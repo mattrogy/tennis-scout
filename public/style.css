@@ -54,6 +54,14 @@ form {
   padding: 16px;
 }
 .field { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.describe {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.describe-row { display: flex; gap: 12px; }
+.describe-row input { flex: 1; }
 label { font-weight: 600; font-size: 0.9rem; }
 .optional { font-weight: 400; color: var(--muted); }
 input, select, button { font: inherit; }
@@ -162,5 +170,7 @@ footer { margin-top: 40px; padding-bottom: 40px; color: var(--muted); font-size:
 
 @media (max-width: 720px) {
   form { grid-template-columns: 1fr; }
+  .describe-row { flex-wrap: wrap; }
+  .describe-row button { width: 100%; }
   button[type="submit"] { width: 100%; }
 }

@@ -1,5 +1,6 @@
-// Tennis Scout page: name search, the Scout button, and safe display of the report.
-// Visitors only pick players from the search list; the page sends player keys, never free text, to /api/report.
+// Tennis Scout page: name search, the plain-English box, the Scout button, and safe display of the report.
+// The report request only carries player keys picked from lists, never free text. The plain-English box sends
+// its text to /api/parse in the request body (never in the URL), and only fills the form for the visitor to check.
 
 const pickedKeys = { scouted: null, coach: null }; // the player_key chosen in each box
 
@@ -23,13 +24,13 @@ function setUpSearch(boxName) {
       list.hidden = true;
       return;
     }
-    timer = setTimeout(() => search(text, list, input, boxName), 250); // wait for a pause in typing
+    timer = setTimeout(() => search(text, boxName), 250); // wait for a pause in typing
   });
 
   input.addEventListener("blur", () => setTimeout(() => (list.hidden = true), 200));
 }
 
-async function search(text, list, input, boxName) {
+async function search(text, boxName) {
   let result;
   try {
     result = await readAnswer(await fetch(`/api/players?q=${encodeURIComponent(text)}`));
@@ -37,11 +38,24 @@ async function search(text, list, input, boxName) {
     result = { ok: false, error: NETWORK_MESSAGE }; // only a real network failure lands here
   }
   const candidates = result.ok ? result.body.candidates : [];
+  showCandidates(boxName, candidates, result.ok ? "No tour-level player found since 2015." : result.error);
+}
+
+function pick(boxName, player) {
+  pickedKeys[boxName] = player.player_key;
+  el(boxName).value = player.name;
+  el(boxName).classList.add("picked");
+  el(`${boxName}-list`).hidden = true;
+}
+
+// The list of players to choose from under a name box (used by the search and by the plain-English box).
+function showCandidates(boxName, candidates, emptyText) {
+  const list = el(`${boxName}-list`);
   list.replaceChildren(); // build the list with textContent only, so names can never become HTML
   if (candidates.length === 0) {
     const empty = document.createElement("li");
     empty.className = "detail";
-    empty.textContent = result.ok ? "No tour-level player found since 2015." : result.error;
+    empty.textContent = emptyText;
     list.append(empty);
   }
   for (const player of candidates) {
@@ -52,16 +66,72 @@ async function search(text, list, input, boxName) {
     detail.className = "detail";
     detail.textContent = ` ${player.tour.toUpperCase()} · ${player.country || "?"} · rank ${player.current_rank}`;
     choose.append(document.createTextNode(player.name), detail);
-    choose.addEventListener("click", () => {
-      pickedKeys[boxName] = player.player_key;
-      input.value = player.name;
-      input.classList.add("picked");
-      list.hidden = true;
-    });
+    choose.addEventListener("click", () => pick(boxName, player));
     item.append(choose);
     list.append(item);
   }
   list.hidden = false;
+}
+
+// ---------------------------------------------------------------- the plain-English box
+
+function clearBox(boxName) {
+  pickedKeys[boxName] = null;
+  el(boxName).value = "";
+  el(boxName).classList.remove("picked");
+  el(`${boxName}-list`).hidden = true;
+}
+
+// Fills one name box: picks the player if the server is sure, otherwise shows the candidates to choose from.
+function fillBox(boxName, found) {
+  clearBox(boxName);
+  if (!found) return;
+  if (found.picked) {
+    pick(boxName, found.picked);
+  } else {
+    el(boxName).value = found.candidates[0].name.split(" ").pop(); // a hint; the visitor picks from the list
+    showCandidates(boxName, found.candidates, "");
+  }
+}
+
+async function describe(event) {
+  event.preventDefault();
+  const message = el("describe-message");
+  const text = el("describe").value.trim();
+  if (!text) return;
+  const button = el("describe-button");
+  button.disabled = true;
+  message.className = "form-message busy";
+  message.textContent = "Reading your request...";
+  try {
+    let result;
+    try {
+      const answer = await fetch("/api/parse", {
+        method: "POST", // the text goes in the body: never in the URL, server logs or caches
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      result = await readAnswer(answer);
+    } catch (networkFailure) {
+      result = { ok: false, error: NETWORK_MESSAGE };
+    }
+    message.className = "form-message";
+    if (!result.ok) {
+      message.textContent = result.error;
+      return;
+    }
+    const fields = result.body;
+    fillBox("scouted", fields.scouted);
+    fillBox("coach", fields.coach);
+    el("surface").value = fields.surface || "";
+    const unsure = !fields.scouted.picked || (fields.coach && !fields.coach.picked);
+    message.className = "form-message busy";
+    message.textContent = unsure
+      ? "Pick the right player from the list, check the surface, then click Scout."
+      : "Form filled: check the players and the surface, then click Scout.";
+  } finally {
+    button.disabled = false;
+  }
 }
 
 // ---------------------------------------------------------------- the report
@@ -157,5 +227,6 @@ async function showFreshness() {
 
 setUpSearch("scouted");
 setUpSearch("coach");
+el("describe-form").addEventListener("submit", describe);
 el("scout-form").addEventListener("submit", scout);
 showFreshness();

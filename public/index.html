@@ -18,6 +18,16 @@
   </header>
 
   <main>
+    <form id="describe-form" class="describe" autocomplete="off">
+      <label for="describe">Describe the match <span class="optional">(optional)</span></label>
+      <div class="describe-row">
+        <input id="describe" type="text" maxlength="200"
+               placeholder="e.g. Alcaraz vs Sinner on clay, I coach Sinner">
+        <button type="submit" id="describe-button">Fill the form</button>
+      </div>
+      <p class="form-message" id="describe-message" role="status"></p>
+    </form>
+
     <form id="scout-form" autocomplete="off">
       <div class="field">
         <label for="scouted">Player to scout</label>
