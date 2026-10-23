@@ -49,9 +49,13 @@ Reply with JSON only, in this shape:
 - "takeaways": 3 to 5 suggestions for the coach's player (or for any coach, when there is no coach's player).
 - Each item: one short headline (at most 15 words) and the IDs of 1 to 4 facts that support it. The facts are
   shown under your headline word for word, so the headline must only say what those facts say.
-- Write each headline as a short, complete, natural English sentence that a coach would say out loud, with
-  possessives and a verb: "<player>'s second serve is a danger", "Expect long service games from <player>",
-  not a list of words such as "Use <player> break points converted".
+- Write each headline as a short, natural sentence a coach would say about the player, not the name of a stat
+  followed by a rule word. Vary the openings: do not start most headlines with Beware, Respect or Prepare.
+  Bad: "<player>'s aces per match struggles on clay"   Good: "Few free points come from <player>'s serve"
+  Bad: "Beware <player> second serve points"           Good: "<player> wins an unusually high share of second-serve points"
+  Bad: "Use <coach's player> break points converted"   Good: "<coach's player> turns break chances into breaks"
+  Bad: "Respect break points saved"                    Good: "Be ready for <player> to save break points under pressure"
+  Bad: "Double faults per match weakness"              Good: "<player>'s double faults can hand your player cheap points"
 - Headlines contain NO numbers and no digits, no dates and no months. Do not use: every, all, none, always, never,
   elite, best, worst, strongest, weakest, top. Do not give advice about shots, spin, depth, placement, rallies or net
   play. Do not name any player other than the two players of the report.

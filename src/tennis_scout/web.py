@@ -36,7 +36,8 @@ NO_STORE = "no-store"
 
 def _answer(content, status=200, cache=False):
     """A JSON answer. Only good answers are cached; errors and failed checks never are."""
-    return JSONResponse(content, status_code=status, headers={"Cache-Control": CACHE_ONE_DAY if cache else NO_STORE})
+    return JSONResponse(content, status_code=status, media_type="application/json; charset=utf-8",  # so "–" shows right
+                        headers={"Cache-Control": CACHE_ONE_DAY if cache else NO_STORE})
 
 
 def _error(message, status):

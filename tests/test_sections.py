@@ -31,6 +31,7 @@ def test_code_sections_hold_the_tool_numbers_and_pass_the_check(fake_db):
     assert '<span class="nowrap">6-3 2-1 RET</span>' in sections[6]  # a score never splits across two lines
     assert "<details>" not in sections[2]  # no surface chosen: there is no all-surface table to fold
     assert "Next Gen Finals" not in sections[4]  # Alpha played none: the reason is not mentioned
+    assert "no usable stats" not in sections[2]  # none for Alpha either
     assert "(Alpha Ace, all surfaces, based on the percentiles)" in sections[5]
     assert "Licence: CC BY-NC-SA 4.0" in sections[10]
     assert check_report(full_report(data), data) == {"passed": True, "numbers_not_found": [], "problems": []}

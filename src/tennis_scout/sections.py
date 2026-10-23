@@ -95,11 +95,12 @@ def _answers(data, tool, player_key=None, surface="any"):
 
 
 def _used_line(answer):
-    """'34 of 36 matches used. Excluded: 1 walkover, 1 retired or ended early, 0 with no usable stats.'"""
+    """'34 of 36 matches used. Excluded: 1 walkover, 1 retired or ended early.' (plus 'N with no usable stats' if any)"""
     excluded = answer["matches_excluded"]
-    return (f"{answer['matches_used']} of {answer['matches_found']} matches used. Excluded: "
-            f"{walkovers(excluded['walkover'])}, {excluded['retired_or_ended_early']} retired or ended early, "
-            f"{excluded['no_usable_stats']} with no usable stats.")
+    reasons = [walkovers(excluded["walkover"]), f"{excluded['retired_or_ended_early']} retired or ended early"]
+    if excluded["no_usable_stats"]:  # only worth a mention when it happened
+        reasons.append(f"{excluded['no_usable_stats']} with no usable stats")
+    return f"{answer['matches_used']} of {answer['matches_found']} matches used. Excluded: {', '.join(reasons)}."
 
 
 def _stat_table(answer, values_key, names):

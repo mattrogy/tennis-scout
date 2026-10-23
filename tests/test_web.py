@@ -49,6 +49,7 @@ def test_health(client):
     answer = client.get("/api/health")
     assert answer.status_code == 200
     assert answer.json()["status"] == "ok" and answer.json()["model"] == llm.MODEL
+    assert answer.headers["content-type"] == "application/json; charset=utf-8"  # browsers show "–", not "â€“"
 
 
 def test_player_search_needs_no_model_and_is_cached(client, model):
