@@ -27,3 +27,8 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["scripts"]  # lets tests "import build_db" to build a tiny test database
+
+# Vercel: during each deploy, download the pinned data and build data/tennis.db (both git-ignored),
+# so the database is never in the repository. The website app itself is found in app.py.
+[tool.vercel.scripts]
+build = "PYTHONPATH=src python scripts/download_data.py && PYTHONPATH=src python scripts/build_db.py"
